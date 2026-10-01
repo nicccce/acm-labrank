@@ -1,0 +1,5 @@
+# Only publish the database port for local Node development.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5433:5432"

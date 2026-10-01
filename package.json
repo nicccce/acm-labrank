@@ -1,0 +1,37 @@
+{
+  "name": "acm-leaderboard",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": "11.19.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "build": "pnpm --filter @acm/web build",
+    "typecheck": "tsc -p tsconfig.tools.json && pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "db:generate": "pnpm --filter @acm/db generate",
+    "db:migrate": "tsx --env-file-if-exists=.env packages/db/src/migrate.ts",
+    "admin:bootstrap": "tsx --env-file-if-exists=.env packages/core/src/application/bootstrap.ts",
+    "queue:probe": "tsx --env-file-if-exists=.env scripts/queue-probe.ts",
+    "verify:smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "eslint": "10.11.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "@acm/db": "workspace:*",
+    "@eslint/js": "10.0.1",
+    "typescript-eslint": "8.71.0",
+    "@next/eslint-plugin-next": "16.3.8",
+    "eslint-plugin-react-hooks": "7.1.1"
+  }
+}

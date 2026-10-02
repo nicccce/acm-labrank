@@ -1,0 +1,12 @@
+{
+  "instance": "main", "template": "record.list", "status": 200,
+  "user": { "uid": 900001, "name": "collector_fixture" },
+  "data": { "records": { "count": 5, "perPage": 2, "result": [
+    { "id": 105, "status": 12, "score": 100, "submitTime": 1779351645,
+      "user": { "uid": 900002, "name": "target_fixture" }, "contest": null,
+      "problem": { "pid": "P1097", "name": "[NOIP 2007 提高组] 统计数字", "difficulty": 2 } },
+    { "id": 104, "status": 14, "submitTime": 1775489264,
+      "user": { "uid": 900002, "name": "target_fixture" }, "contest": null,
+      "problem": { "pid": "P15144", "name": "[SWERC 2025] Jewels Building", "difficulty": 3 } }
+  ] } }
+}

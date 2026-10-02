@@ -1,5 +1,5 @@
 import { getConnector } from '@acm/connectors/server';
-import { ConnectorError, type AccountRef, type ConnectorCheckpoint, type ConnectorCursor, type NormalizedProblem, type NormalizedSubmission, type PlatformId, type RequestContext, type SubmissionPage } from '@acm/connectors/contracts';
+import { ConnectorError, type AccountRef, type ConnectorCheckpoint, type ConnectorCursor, type NormalizedProblem, type NormalizedSubmission, type PlatformId, type Profile, type RatingHistory, type RequestContext, type SubmissionPage } from '@acm/connectors/contracts';
 
 export interface ReadAccountOptions {
   platform: PlatformId;
@@ -10,6 +10,9 @@ export interface ReadAccountOptions {
   pageSize?: number;
   maxPages?: number;
   maxDurationMs?: number;
+  withProfile?: boolean;
+  withRating?: boolean;
+  contestId?: string;
 }
 export interface AccountReadResult {
   account: AccountRef;
@@ -17,6 +20,8 @@ export interface AccountReadResult {
   rawRecordCount: number;
   submissions: NormalizedSubmission[];
   problems: NormalizedProblem[];
+  profile?: Profile;
+  ratingHistory?: RatingHistory;
   cursor: ConnectorCursor | null;
   checkpoint: ConnectorCheckpoint | null;
   stopReason: SubmissionPage['stopReason'];
@@ -57,7 +62,9 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
       if (Date.now() >= deadline) { result.batchStatus = 'budget_exhausted'; break; }
       signal.throwIfAborted();
       const scan = { mode: options.mode, cursor: result.cursor, checkpoint: options.checkpoint ?? null, pageSize: options.pageSize };
-      const page = await connector.fetchSubmissionPage(account, scan, batchCtx);
+      const page = options.contestId
+        ? await (connector.fetchContestSubmissionPage ?? unsupported)(account, options.contestId, scan, batchCtx)
+        : await connector.fetchSubmissionPage(account, scan, batchCtx);
       signal.throwIfAborted();
       await onPage?.(page);
       // Only publish progress once the page consumer succeeds.
@@ -70,6 +77,8 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
       if (page.nextCheckpoint) result.checkpoint = page.nextCheckpoint;
       if (page.stopReason !== 'more') { result.batchStatus = 'complete'; break; }
     }
+    if (options.withProfile) result.profile = await (connector.fetchProfile ?? unsupported)(account, batchCtx);
+    if (options.withRating) result.ratingHistory = await (connector.fetchRatingHistory ?? unsupported)(account, batchCtx);
   } catch (error) {
     if (!signal.aborted) {
       result.submissions = [...submissions.values()];
@@ -81,4 +90,15 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
   result.submissions = [...submissions.values()];
   result.problems = [...problems.values()];
   return result;
+}
+function unsupported(): never { throw new ConnectorError('NOT_IMPLEMENTED', 'The connector does not support this read capability'); }
+
+/** Explicit, on-demand auxiliary reads; no contest or problem crawl is scheduled. */
+export async function readCodeforcesContest(input: { operation: 'standings' | 'contests' | 'problem'; contestId?: string; index?: string }, ctx: RequestContext) {
+  const connector = getConnector('codeforces');
+  if (input.operation === 'contests') return connector.fetchContests!(ctx);
+  if (!input.contestId) throw new ConnectorError('INVALID_INPUT', 'contestId is required');
+  if (input.operation === 'standings') return connector.fetchStandings!(input.contestId, ctx);
+  if (!input.index) throw new ConnectorError('INVALID_INPUT', 'Problem index is required');
+  return connector.fetchProblem!(input.contestId, input.index, ctx);
 }

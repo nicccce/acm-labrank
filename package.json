@@ -20,10 +20,13 @@
     "db:migrate": "tsx --env-file-if-exists=.env packages/db/src/migrate.ts",
     "admin:bootstrap": "tsx --env-file-if-exists=.env packages/core/src/application/bootstrap.ts",
     "queue:probe": "tsx --env-file-if-exists=.env scripts/queue-probe.ts",
+    "cf:read": "tsx --env-file-if-exists=.env apps/worker/src/codeforces-read.ts",
+    "cf:lease-probe": "tsx --env-file-if-exists=.env scripts/platform-lease-probe.ts",
     "verify:smoke": "node scripts/smoke.mjs",
     "qoj:debug": "tsx --env-file-if-exists=.env apps/worker/src/qoj-debug.ts",
     "qoj:confirm": "tsx --env-file-if-exists=.env scripts/qoj-confirm.ts",
-    "qoj:cancel-probe": "tsx --env-file-if-exists=.env scripts/qoj-queue-probe.ts"
+    "qoj:cancel-probe": "tsx --env-file-if-exists=.env scripts/qoj-queue-probe.ts",
+    "luogu:read": "tsx --env-file-if-exists=.env apps/worker/src/luogu.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

@@ -6,5 +6,8 @@ node_modules
 .env.*
 .secrets
 .local
+.kilo
+.codex
+.agents
 coverage
 *.tsbuildinfo

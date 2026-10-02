@@ -117,6 +117,32 @@ docker compose logs --tail=100 web worker migrate bootstrap
 
 停止可使用 `docker compose down`，命名卷保留数据库。更新、备份和恢复的产品目标见项目设计；完整榜单及同步调度仍按阶段实施。各平台最新接口实现与实际验证状态以平台 README 为准。
 
+## Codeforces 读取入口
+
+已实现官方账号解析、所有 verdict 的个人提交、分页回填/增量、资料、评级历史和按需比赛/难度读取。CF 不需要密码，不采集源代码：
+
+```powershell
+pnpm db:migrate
+pnpm cf:read --handle tourist --mode backfill --page-size 100 --max-pages 3
+pnpm cf:read --handle tourist --mode backfill --page-size 5 --max-pages 2 --with-profile --with-rating
+```
+
+2026-10-01 19:50—19:56（北京时间）的真实 Worker 验证：tourist 两页 10 条、去重 9 条，评级历史 308 条；MikeMirzayanov 完整扫描 4 页、187 条唯一提交，真实 checkpoint 的增量读取在 2 页后结束。共享配额和在途租约通过真实 PostgreSQL 验证，公开比赛 566 的正式 standings 和题目难度查询也已通过。独立网络验收脚本 `./scripts/cf-live-verify.ps1` 使用可自动清理的空白测试数据库；本机容器外网仍有限制，宿主读取已通过。匹配镜像已重建，web/worker 的健康状态已恢复。
+
+读取接口尚未接入业务提交入库、持久化游标或自动调度；Web 未开放绑定与榜单。迁移与现有镜像必须匹配，旧运行镜像不会自动更新。接口、参数、续跑方式、证据边界和测试记录见 [Codeforces README](packages/connectors/src/codeforces/README.md)。
+
+## 洛谷个人原始提交入口
+
+已实现通用用户名/UID 解析、UID 资料对照、全部原生状态的提交读取、版本化回填/增量游标及独立登录适配器。Worker 命令：
+
+```powershell
+pnpm luogu:read --account MD_Aurora --login --username Nick1024
+pnpm luogu:read --account MD_Aurora --mode backfill --max-pages 2
+pnpm luogu:read --account 863154 --mode backfill --max-pages 2
+```
+
+登录验证码需要人工输入；Cookie 使用公共请求租约和 PostgreSQL AES-GCM 加密会话，密码/验证码不入库或队列。`MD_Aurora → 863154` 已在 Node.js 实测；浏览器可见 1295 条、65 页。2026-10-01 21:19（北京时间）完成真实 Worker 登录、采集身份核对和两页读取，并由新的 Worker 进程分别以用户名、数字 UID 复用加密 Cookie：每次均得到 40 条唯一提交、17 个题目，状态为 accepted 24 / rejected 16。真实查询入口、字段、分页、时间与难度依据、完整运行方式和权限缺口见[洛谷连接器 README](packages/connectors/src/luogu/README.md)。
+
 ## QOJ 个人原始提交入口
 
 运行与维护见 [QOJ 采集流程与技术维护](docs/QOJ采集流程与技术维护.md)，包括当前浏览器复用、人工登录、正式队列、回填增量、升级和故障处理。

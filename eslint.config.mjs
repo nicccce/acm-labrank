@@ -5,7 +5,7 @@ import next from '@next/eslint-plugin-next';
 import hooks from 'eslint-plugin-react-hooks';
 
 export default defineConfig([
-  globalIgnores(['**/.next/**', '**/node_modules/**', '**/next-env.d.ts', '**/drizzle/meta/**', '.local/**']),
+  globalIgnores(['**/.next/**', '**/node_modules/**', '**/next-env.d.ts', '**/drizzle/meta/**', '.local/**', '.kilo/**']),
   js.configs.recommended,
   ...ts.configs.recommended,
   {
@@ -19,10 +19,10 @@ export default defineConfig([
   },
   {
     files: ['packages/core/src/domain/**/*.ts', 'packages/connectors/src/contracts/**/*.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: ['node:*', '@acm/db/*', '@acm/core/server', '@acm/connectors/server', '**/application/*'] }] },
+    rules: { 'no-restricted-imports': ['error', { patterns: ['node:*', '@acm/db/*', '@acm/core/server', '@acm/core/reads', '@acm/connectors/server', '**/application/*'] }] },
   },
   {
     files: ['apps/web/src/components/**/*.tsx'],
-    rules: { 'no-restricted-imports': ['error', { patterns: ['@acm/db/*', '@acm/core/server', '@acm/connectors/server'] }] },
+    rules: { 'no-restricted-imports': ['error', { patterns: ['@acm/db/*', '@acm/core/server', '@acm/core/reads', '@acm/connectors/server'] }] },
   },
 ]);

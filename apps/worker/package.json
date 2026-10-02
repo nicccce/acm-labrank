@@ -7,11 +7,8 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
     "health": "tsx src/health.ts",
+    "cf:read": "tsx --env-file-if-exists=../../.env src/codeforces-read.ts",
     "qoj:debug": "tsx --env-file-if-exists=../../.env src/qoj-debug.ts"
   },
-  "dependencies": {
-    "@acm/core": "workspace:*",
-    "@acm/db": "workspace:*",
-    "tsx": "4.23.15"
-  }
+  "dependencies": { "@acm/core": "workspace:*", "@acm/db": "workspace:*", "tsx": "4.23.15" }
 }

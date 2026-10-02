@@ -1,25 +1,8 @@
 # 洛谷个人原始提交连接器
 
-实现位置：`index.ts`（读取）、`parser.ts`（解析与 Zod 校验）、`login.ts`（独立登录）。已注册 registry，经 `core/application/luogu.ts` 的 `collectLuogu`、`beginLuoguLogin` 提供 Worker 调用。所有请求经过 `RequestContext.request`，复用 PostgreSQL 公共独占请求租约、限速、超时、取消、响应大小限制及 Cookie hooks；默认洛谷间隔 3000 ms。密码 POST 不自动重试。
+实现位置：`index.ts`（读取）、`parser.ts`（解析与 Zod 校验）、`login.ts`（独立登录）。已注册 registry，正式读取经 `core/application/collection/read.ts` 的 `readPlatform`；`platforms/luogu/read.ts` 保留登录验证用例。所有请求经过 `RequestContext.request`，复用 PostgreSQL 公共独占请求租约、限速、超时、取消、响应大小限制及 Cookie hooks；数据库策略默认洛谷间隔 3000–5000 ms。密码 POST 不自动重试。
 
-## 本轮实测状态
-
-日期：2026-10-01，Asia/Shanghai；真实登录与跨进程复验完成于 21:19。采集身份 `Nick1024` 与测试目标 `MD_Aurora` 分开。
-
-| 能力 | 本轮结果 |
-| --- | --- |
-| Node.js 用户名解析、UID 反查、资料对照 | `MD_Aurora → 863154 → MD_Aurora`，已验证 |
-| 不存在账号 | 实际返回 404、`NotFoundHttpException`、`找不到用户` |
-| 浏览器目标提交列表 | 1295 条、`perPage=20`、65 页，已打开两页 |
-| 原生状态与时间 | 第一页 `12=Accepted`、`14=Unaccepted`，Unix 秒与网页北京时间对照，已验证 |
-| Node.js 登录准备 | 实际登录页、CSRF、官方路由配置、login-methods、当前图片验证码成功取得 |
-| 正确密码 POST、Node.js 登录身份及 Worker 两页读取 | 成功；采集身份核对为 `Nick1024`，目标为 `MD_Aurora` / `863154` |
-| 加密 Cookie 跨进程复用 | 成功；新 Worker 进程以用户名和数字 UID 均读取两页 |
-| practice | Node.js 可见 507 个 passed、7 个 submitted，仅作核对 |
-
-已通过实际连接器及公共 PostgreSQL 请求租约再次实测用户名/UID、practice、不存在账号；未登录提交读取实际返回 AUTH_REQUIRED。原网页第二页样本：262465152 / P4779 / status=12 / submitTime=1770781325；262442174 / P3386 / status=12 / submitTime=1770776060；作者均 863154。
-
-真实 Worker 登录批次读取 2 页、40 条唯一提交、17 个题目，状态分布为 accepted 24 / rejected 16，原生状态为 12、14；随后两个新 Worker 进程分别以 `MD_Aurora` 和 `863154` 复用数据库加密 Cookie，得到同样结果。最早提交时间为 `2026-01-29T10:16:02.000Z`，最晚为 `2026-05-21T08:20:45.000Z`。数据库中实际 envelope 为 version 1，包含 keyId/nonce/tag/ciphertext，未出现采集或目标用户名明文。最终 `pnpm check` 为 10 个测试文件、100 项测试通过，`pnpm build` 通过。不以浏览器成功或 fixture 代替 Worker 验证。
+历史真实登录及跨进程验收见[2026-10-01 验收记录](../../../../docs/archive/2026-10-01-洛谷验收.md)；公共契约及管理 API 见[采集文档](../../../../docs/采集架构与管理API.md)。
 
 ## 真实用户名查询入口
 
@@ -54,7 +37,7 @@ HTML script#lentille-context: template="user.show", data.user.uid/name
 
 密码、验证码文本仅在当前进程调用使用，完成后清空输入引用；不写文件、数据库、队列或日志。临时 jar 在内存；正式 jar 使用 `SESSION_ENCRYPTION_KEY_FILE` 的独立 32 字节 hex Secret 作 AES-256-GCM 加密。envelope 有 version/keyId/nonce/tag/ciphertext，AAD 绑定洛谷与 connection ID，保存在 PostgreSQL `connector_sessions.encrypted_session`。取得请求租约后读最新 jar，释放前保存轮换 Cookie；Cookie/Set-Cookie 不向 CLI 输出。
 
-图片是短时挑战文件，刷新覆盖，结束/取消/超时清理；尝试 10 分钟有效。当前实现 Worker/应用登录入口，未交付完整管理员页面、管理员会话绑定的持久化 login attempt、断开及 generation/cookie_revision 生命周期。二次认证或原域风控需要人工处理；不能自动解验证码。
+图片是短时挑战文件，刷新覆盖，结束/取消/超时清理；尝试 10 分钟有效。当前实现 Worker/应用登录入口，已实现连接 generation 与 Cookie 修订保护；完整管理员登录页面、会话绑定的持久化 login attempt 和断开接口仍待实现。二次认证或原域风控需要人工处理；不能自动解验证码。
 
 ## 提交、难度与时间依据
 
@@ -88,28 +71,28 @@ script#lentille-context:
 
 ## 运行命令
 
-要求项目 Node.js 24 / pnpm 11。本机固定 Node 在父目录 `.local/runtime/node_modules/node/bin/node.exe`，将此目录加入 PATH。配置 .env 与 Secret：
+使用项目固定 Node.js 24 / pnpm 11，并配置本地 .env 与 Secret：
 
 ```powershell
 docker compose -f compose.yaml -f compose.dev.yaml up -d db
 pnpm db:migrate
 
 # 建立独立会话；不接受密码命令行参数。
-pnpm luogu:read --account MD_Aurora --login --username Nick1024
+pnpm luogu:read --target MD_Aurora --login --username Nick1024
 # 看实际图片后在无回显标准输入提交 JSON：
 # {"action":"login","version":1,"password":"当前密码","captcha":"人工字符","expectedHandle":"Nick1024"}
 # 刷新 {"action":"refresh","version":1}；取消 {"action":"cancel"}
 
 # 新进程复用数据库加密 Cookie，目标可用用户名或 UID。
-pnpm luogu:read --account MD_Aurora --mode backfill --max-pages 2
-pnpm luogu:read --account 863154 --mode backfill --max-pages 2
+pnpm luogu:read --target MD_Aurora --mode backfill --max-pages 2
+pnpm luogu:read --target 863154 --mode backfill --max-pages 2
 
 # 可选本地调试工件：按页原子保存标准事实及两种独立扫描位置。
-pnpm luogu:read --account MD_Aurora --mode backfill --max-pages 10 --state .local/luogu/md-aurora.json
-pnpm luogu:read --account MD_Aurora --mode incremental --max-pages 10 --state .local/luogu/md-aurora.json
+pnpm luogu:read --target MD_Aurora --mode backfill --max-pages 10 --state .local/luogu/md-aurora.json
+pnpm luogu:read --target MD_Aurora --mode incremental --max-pages 10 --state .local/luogu/md-aurora.json
 ```
 
-CLI 只输出核验、页数、去重提交/题目数、verdict/nativeStatus 分布、UTC 范围和覆盖进度。可选 state 文件含原始标准事实/游标，不含秘密；它是本地调试工件，不是生产提交数据库表。`collectLuogu.onPage` 供后续生产单页事务写入使用；本轮未交付完整队列调度、榜单或首次 AC 持久化。
+普通读取 CLI 输出公共运行摘要；登录验证另外输出判题分布和 UTC 范围。可选 state 文件含原始标准事实/游标，不含秘密；它是本地调试工件，不是生产提交数据库表。`readPlatform.onPage` 供调用方保存页级工件；`--enqueue` 使用公共按需队列。正式提交、榜单和首次 AC 持久化仍未实现。数据库失败重试从原批次输入开始，诊断游标不能替代已保存的事实。
 
 ## 样本与功能边界
 

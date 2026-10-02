@@ -71,7 +71,10 @@ export const luoguLogin = {
   async verifySession(ctx: RequestContext) {
     const response = await ctx.request(new URL('/', ORIGIN));
     const html = await response.text();
-    if (!response.ok) throw new ConnectorError('AUTH_REQUIRED', '无法核对洛谷登录身份');
+    if (response.status === 429) throw new ConnectorError('RATE_LIMITED', '洛谷限制身份核验频率', { httpStatus: 429 });
+    if (response.status >= 500) throw new ConnectorError('TEMP_UNAVAILABLE', '洛谷身份核验暂不可用', { httpStatus: response.status });
+    if (response.status === 403) throw new ConnectorError('FORBIDDEN', '洛谷拒绝本次身份核验', { httpStatus: 403 });
+    if (!response.ok) throw new ConnectorError('AUTH_REQUIRED', '无法核对洛谷登录身份', { httpStatus: response.status });
     const page = parseContext(html);
     if (!page.user) throw new ConnectorError('AUTH_REQUIRED', '洛谷会话未登录');
     return validated(userSchema, page.user);

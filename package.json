@@ -26,7 +26,8 @@
     "qoj:debug": "tsx --env-file-if-exists=.env apps/worker/src/qoj-debug.ts",
     "qoj:confirm": "tsx --env-file-if-exists=.env scripts/qoj-confirm.ts",
     "qoj:cancel-probe": "tsx --env-file-if-exists=.env scripts/qoj-queue-probe.ts",
-    "luogu:read": "tsx --env-file-if-exists=.env apps/worker/src/luogu.ts"
+    "luogu:read": "tsx --env-file-if-exists=.env apps/worker/src/luogu.ts",
+    "collection:probe": "tsx --env-file-if-exists=.env scripts/collection-probe.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

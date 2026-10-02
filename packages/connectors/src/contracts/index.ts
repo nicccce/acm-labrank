@@ -1,4 +1,5 @@
 export type PlatformId = 'codeforces' | 'qoj' | 'luogu';
+export type { PlatformReadRequest, PlatformReadOutcome, ReadStatus, ReadAction, ReadFailure, ReadProgress } from './collection';
 export { parseRetryAfter } from './http';
 export type Verdict = 'accepted' | 'rejected' | 'pending' | 'unknown';
 export type ConnectorCursor = { version: number; data: unknown };

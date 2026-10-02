@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import { ConnectorError, type RequestContext } from '../contracts/index';
+import { ConnectorError, parseRetryAfter, type RequestContext } from '../contracts/index';
 
 export const ORIGIN = 'https://qoj.ac';
 function hasChallengeHtml(html: string) {
@@ -37,6 +37,8 @@ export async function getHtml(url: URL, ctx: RequestContext) {
   const response = await ctx.request(url, { redirect: 'manual' });
   const html = await response.text();
   if (isCloudflareChallenge(response, html)) throw new ConnectorError('CHALLENGE_REQUIRED', 'QOJ Cloudflare requires human browser verification', { httpStatus: response.status });
+  if (response.status === 429) throw new ConnectorError('RATE_LIMITED', 'QOJ rate limited the request', { httpStatus: 429, retryAt: parseRetryAfter(response.headers.get('retry-after')) });
+  if (response.status >= 500) throw new ConnectorError('HTTP_ERROR', 'QOJ is temporarily unavailable', { httpStatus: response.status });
   // Check challenges before treating 403 as a platform permission decision.
   assertHtml(html);
   const location = response.headers.get('location');
@@ -46,7 +48,6 @@ export async function getHtml(url: URL, ctx: RequestContext) {
   if (response.status === 401) throw new ConnectorError('AUTH_REQUIRED', 'QOJ requires login');
   if (response.status === 403) throw new ConnectorError('FORBIDDEN', 'QOJ denies access');
   if (response.status === 404) throw new ConnectorError('ACCOUNT_NOT_FOUND', 'QOJ resource not found');
-  if (response.status === 429) throw new ConnectorError('RATE_LIMITED', 'QOJ rate limited the request');
   if (response.status !== 200 || !response.headers.get('content-type')?.includes('text/html')) {
     throw new ConnectorError('PARSE_CHANGED', 'Unexpected QOJ response or redirect');
   }

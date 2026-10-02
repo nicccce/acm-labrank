@@ -44,6 +44,12 @@ export async function requireSession(request?: Request) {
   }
   return { token, session };
 }
+export async function requireAdmin(request?: Request) {
+  if (request) checkOrigin(request);
+  const authenticated = await requireSession(request);
+  if (authenticated.session.user.role !== 'admin') throw new AppError('FORBIDDEN', '仅管理员可以执行此操作', 403);
+  return authenticated;
+}
 export async function api(handler: () => Promise<NextResponse>) {
   const requestId = randomUUID();
   try {

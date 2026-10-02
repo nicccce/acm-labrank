@@ -25,4 +25,13 @@ export default defineConfig([
     files: ['apps/web/src/components/**/*.tsx'],
     rules: { 'no-restricted-imports': ['error', { patterns: ['@acm/db/*', '@acm/core/server', '@acm/core/reads', '@acm/connectors/server'] }] },
   },
+  {
+    files: ['packages/connectors/src/**/*.ts'],
+    ignores: ['packages/connectors/src/contracts/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: ['@acm/db/*', '@acm/core/*', '**/apps/**'] }] },
+  },
+  {
+    files: ['packages/core/src/application/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: ['**/apps/**'] }] },
+  },
 ]);

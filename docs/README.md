@@ -1,0 +1,17 @@
+# 文档索引
+
+当前实现以代码、迁移和下列维护文档为准。产品设计中的未来接口与数据模型不代表已经交付。
+
+| 文档 | 用途 |
+| --- | --- |
+| [项目入口](../README.md) | 启动、开发、目录和常用命令 |
+| [项目设计](项目设计.md) | 产品范围、数据口径和后续阶段 |
+| [采集架构与管理 API](采集架构与管理API.md) | 三平台公共读取、限流、失败与鉴权恢复 |
+| [QOJ 运行手册](QOJ采集流程与技术维护.md) | 浏览器部署、人工接管与故障处理 |
+| [Codeforces 连接器](../packages/connectors/src/codeforces/README.md) | 官方接口、证据及分页规则 |
+| [洛谷连接器](../packages/connectors/src/luogu/README.md) | 登录、字段、分页及权限规则 |
+| [QOJ 连接器](../packages/connectors/src/qoj/README.md) | HTML 解析、字段与完整性规则 |
+
+## 历史归档
+
+[archive/README.md](archive/README.md) 索引首次环境检测、平台真实验收及早期能力观察。这些文档保留当时结果，不能作为当前命令、目录、测试数量或部署状态的依据。

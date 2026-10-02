@@ -14,6 +14,10 @@ x-app: &app
     TZ: UTC
     SYNC_ENABLED: ${SYNC_ENABLED:-false}
     CF_MIN_INTERVAL_MS: ${CF_MIN_INTERVAL_MS:-2000}
+    QOJ_MIN_INTERVAL_MS: ${QOJ_MIN_INTERVAL_MS:-3000}
+    LUOGU_MIN_INTERVAL_MS: ${LUOGU_MIN_INTERVAL_MS:-3000}
+    QOJ_CONNECTION_ID: ${QOJ_CONNECTION_ID:-qoj-lab}
+    LUOGU_CONNECTION_ID: ${LUOGU_CONNECTION_ID:-luogu-lab}
     SESSION_ENCRYPTION_KEY_FILE: /run/secrets/session_encryption_key
   logging:
     driver: json-file

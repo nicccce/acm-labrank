@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getPool } from './client';
 
 // Increment when adding a business migration. Older/newer schemas require an explicit deployment.
-export const EXPECTED_MIGRATIONS = 1;
+export const EXPECTED_MIGRATIONS = 2;
 // pg-boss 12.35.1 uses schema 43; update together with the locked library.
 export const EXPECTED_QUEUE_SCHEMA = 43;
 
@@ -11,6 +11,8 @@ export async function checkDatabaseReady(): Promise<boolean> {
   const result = await pool.query(`SELECT to_regclass('public.users') AS users,
     to_regclass('public.sessions') AS sessions,
     to_regclass('public.runtime_heartbeats') AS heartbeats,
+    to_regclass('public.platform_request_limits') AS platform_limits,
+    to_regclass('public.connector_sessions') AS connector_sessions,
     to_regclass('pgboss.version') AS queue,
     to_regclass('drizzle.__drizzle_migrations') AS migrations`);
   if (Object.values(result.rows[0]).some((value) => value === null)) return false;

@@ -25,3 +25,29 @@ COPY --from=build --chown=node:node /app /app
 USER node
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@acm/web", "start"]
+
+# Browser OS layers are independent of application source changes.
+FROM base AS browser-system
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security
+RUN sed -i "s|http://deb.debian.org/debian$|${DEBIAN_MIRROR}|;s|http://deb.debian.org/debian-security$|${DEBIAN_SECURITY_MIRROR}|" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends chromium xvfb x11-utils openbox x11vnc novnc websockify tigervnc-tools fonts-noto-cjk \
+    && sed -i "s|${DEBIAN_MIRROR}$|http://deb.debian.org/debian|;s|${DEBIAN_SECURITY_MIRROR}$|http://deb.debian.org/debian-security|" /etc/apt/sources.list.d/debian.sources \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM browser-system AS worker-browser
+ENV NODE_ENV=production
+ENV TZ=UTC
+COPY --from=runtime --chown=node:node /app /app
+ENV DISPLAY=:99
+ENV TMPDIR=/tmp/qoj-browser
+ENV XDG_CONFIG_HOME=/tmp/qoj-config
+ENV XDG_CACHE_HOME=/tmp/qoj-cache
+USER node
+EXPOSE 6080
+ENTRYPOINT ["node", "scripts/qoj-container.mjs"]
+CMD ["pnpm", "--filter", "@acm/worker", "start"]
+
+# Plain docker build still produces the normal application image.
+FROM runtime AS default

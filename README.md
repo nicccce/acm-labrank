@@ -50,7 +50,7 @@ scripts/                     初始化、环境检测与运行验证
 
 依赖方向：`apps → core/application → db、connectors`。领域规则不访问环境、数据库或网络，连接器不写库或决定本站归属。业务服务直接使用 db helpers，不为每张表增加 repository/service。共享包没有混合根入口，客户端只导入 `@acm/core/domain`、`@acm/connectors/contracts` 或 `metadata`；服务端入口设置浏览器导入屏障，ESLint 检查关键依赖边界。
 
-只有四张业务/运行表：`users`、`sessions`、`auth_rate_limits`、`runtime_heartbeats`，另有 Drizzle 迁移记录及 pg-boss 队列 schema。平台账号、提交和队伍表在相应阶段追加。
+当前有认证/运行表 `users`、`sessions`、`auth_rate_limits`、`runtime_heartbeats`，以及读取入口使用的共享 `platform_request_limits` 和通用加密 `connector_sessions`；另有 Drizzle 迁移记录及 pg-boss 队列 schema。平台账号、提交、业务同步游标和队伍表尚未建立。
 
 ## 本地开发
 
@@ -105,7 +105,7 @@ docker compose logs --tail=100 web worker migrate bootstrap
 
 所有写请求要求 `Origin` 与 `APP_URL` 相同；退出还要求 `X-CSRF-Token`。密码使用 Argon2id，随机会话 token 仅以 SHA-256 哈希入库；Cookie 为 HttpOnly / SameSite=Lax，HTTPS 时 Secure。认证接口使用数据库限流，支持跨进程共享；错误返回 `{code, message, requestId, retryAt?}`。用户 DTO 不包含密码哈希。普通页面和会话响应不进入公共缓存。
 
-`SYNC_ENABLED` 为未来同步调度保留，当前 worker 仅消费系统探针、维护心跳并在启动时清理过期运行数据，不向外站发请求。平台未连接不影响 Web 就绪。
+`SYNC_ENABLED` 为未来同步调度保留。常驻 worker 仍消费系统探针并维护心跳；独立读取命令可经 application 调用平台连接器，使用 PostgreSQL 共享请求配额。自动同步调度和业务入库尚未接通，平台未连接不影响 Web 就绪。
 
 ## 扩展步骤
 
@@ -115,4 +115,32 @@ docker compose logs --tail=100 web worker migrate bootstrap
 - 新积分规则：在 `core/domain` 添加带版本的纯函数、配置和边界测试；不从客户端读取数据库。
 - 更新 pg-boss：一起检查版本、迁移和 `EXPECTED_QUEUE_SCHEMA`，重新运行队列探针。平台任务的并发、游标与请求租约按项目设计实现。
 
-停止可使用 `docker compose down`，命名卷保留数据库。更新、备份和恢复的产品目标见项目设计；本次未实现外站登录或完整榜单，也未进行外站账号实测。
+停止可使用 `docker compose down`，命名卷保留数据库。更新、备份和恢复的产品目标见项目设计；完整榜单及同步调度仍按阶段实施。各平台最新接口实现与实际验证状态以平台 README 为准。
+
+## QOJ 个人原始提交入口
+
+运行与维护见 [QOJ 采集流程与技术维护](docs/QOJ采集流程与技术维护.md)，包括当前浏览器复用、人工登录、正式队列、回填增量、升级和故障处理。
+
+已实现个人账号解析、全状态提交 HTML 解析、分页与版本化游标。正式 Worker 的 `platform.qoj.read` 队列和调试命令共用应用处理器；配置 `QOJ_TRANSPORT=browser` 可启用专用有界面 Edge/Chromium。Docker CDP 模式复用常驻浏览器当前登录状态，不自动导入数据库 Cookie；独立启动浏览器的模式仍保留原有加密恢复逻辑：
+
+```powershell
+pnpm db:migrate
+pnpm qoj:debug --browser --target muhammad --connection qoj-lab --pages 2 --state .local/qoj-backfill.json --http-diagnostics
+# 正式 Worker 使用环境中的 QOJ_TRANSPORT；另一个终端投递只读任务
+pnpm qoj:debug --enqueue --target muhammad --pages 2
+```
+
+Docker 服务器使用可选 `compose.qoj-browser.yaml`，由 Worker 容器内的 Chromium + Xvfb 执行导航；管理员通过 noVNC 远程操作同一个浏览器。宿主机无需 pnpm：
+
+```powershell
+node scripts/setup.mjs
+docker compose -f compose.yaml -f compose.qoj-browser.yaml build worker
+docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d
+docker compose -f compose.yaml -f compose.qoj-browser.yaml exec worker pnpm qoj:debug --enqueue --target muhammad --pages 2
+```
+
+noVNC 默认为 `http://127.0.0.1:6080/vnc.html`；远程部署通过 SSH 隧道访问，使用本地受保护的 `.secrets/qoj-vnc-password`。具体人工确认、tmpfs/加密会话和实测边界见 [QOJ Docker 说明](packages/connectors/src/qoj/README.md#docker-浏览器与生命周期)。
+
+2026-10-02 17:29—17:42（北京时间），正式 Worker 经真实 PostgreSQL 队列完成 muhammad 的41页可见历史：406条唯一提交、59个题目，第41页HTTP 200，history_end/historyComplete=true；真实checkpoint增量在两页后checkpoint_reached。可选 `QOJ_BROWSER_MANUAL_START=true` 让容器先打开正常登录页，管理员登录后用 `pnpm qoj:confirm --attach --id 当前事件UUID` 确认一次性接管；Worker 随后核验登录身份并重新请求目标。CDP只监听容器回环，QOJ以常驻浏览器会话为准，新脚本不自动导入密文Cookie；退出仅断开连接，保留容器Chromium。当前浏览器未重启，用户已取消密文恢复验证。
+
+镜像内完整 `pnpm check`（123 项测试）和生产构建通过；真实挑战任务取消、截图清理、未接管时的预算到期和 CDP/CLI 退出已验证。本机 Docker 直连出网失败，实测使用受限 TLS CONNECT 诊断代理，生产服务器不应依赖该临时脚本。Cloudflare 对受控浏览器可能再次拒绝，延迟接管不能保证通过；真实全量、会话恢复及最终统计以[QOJ README](packages/connectors/src/qoj/README.md)为准。远程桌面尚未嵌入本站管理员界面。

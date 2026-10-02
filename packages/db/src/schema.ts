@@ -35,3 +35,18 @@ export const runtimeHeartbeats = pgTable('runtime_heartbeats', {
   service: text('service').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const platformRequestLimits = pgTable('platform_request_limits', {
+  platform: text('platform').primaryKey(),
+  nextRequestAt: timestamp('next_request_at', { withTimezone: true }).defaultNow().notNull(),
+  blockedUntil: timestamp('blocked_until', { withTimezone: true }).defaultNow().notNull(),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+}, (table) => [check('platform_request_lease_pair', sql`(${table.leaseToken} IS NULL) = (${table.leaseExpiresAt} IS NULL)`)]);
+
+export const connectorSessions = pgTable('connector_sessions', {
+  id: text('id').primaryKey(),
+  platform: text('platform').notNull(),
+  encryptedSession: text('encrypted_session').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

@@ -4,6 +4,7 @@ x-app: &app
   image: acm-leaderboard:local
   build:
     context: .
+    target: runtime
   init: true
   environment: &app-env
     NODE_ENV: production

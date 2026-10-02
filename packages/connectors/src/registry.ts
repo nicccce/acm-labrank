@@ -1,8 +1,11 @@
 import type { PlatformId, ReadConnector } from './contracts/index';
 import { ConnectorError } from './contracts/index';
+import { qojConnector } from './qoj/index';
+export { qojLogin } from './qoj/login';
+export { qojResponseIssue } from './qoj/http';
 
-// Register each verified adapter explicitly here. An empty registry is a visible capability gap.
-const registry: Partial<Record<PlatformId, ReadConnector>> = {};
+// Register implemented adapters explicitly; missing entries remain explicit capability gaps.
+const registry: Partial<Record<PlatformId, ReadConnector>> = { qoj: qojConnector };
 
 export function getConnector(platform: PlatformId): ReadConnector {
   const connector = registry[platform];

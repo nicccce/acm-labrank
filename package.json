@@ -20,7 +20,10 @@
     "db:migrate": "tsx --env-file-if-exists=.env packages/db/src/migrate.ts",
     "admin:bootstrap": "tsx --env-file-if-exists=.env packages/core/src/application/bootstrap.ts",
     "queue:probe": "tsx --env-file-if-exists=.env scripts/queue-probe.ts",
-    "verify:smoke": "node scripts/smoke.mjs"
+    "verify:smoke": "node scripts/smoke.mjs",
+    "qoj:debug": "tsx --env-file-if-exists=.env apps/worker/src/qoj-debug.ts",
+    "qoj:confirm": "tsx --env-file-if-exists=.env scripts/qoj-confirm.ts",
+    "qoj:cancel-probe": "tsx --env-file-if-exists=.env scripts/qoj-queue-probe.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

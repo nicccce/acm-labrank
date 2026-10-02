@@ -4,14 +4,21 @@
   "type": "module",
   "exports": {
     "./domain": "./src/domain/index.ts",
-    "./server": { "browser": "./src/browser.ts", "default": "./src/application/index.ts" }
+    "./server": {
+      "browser": "./src/browser.ts",
+      "default": "./src/application/index.ts"
+    }
   },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "@acm/db": "workspace:*",
     "@acm/connectors": "workspace:*",
     "argon2": "0.45.1",
     "zod": "4.6.5",
-    "server-only": "0.0.1"
+    "server-only": "0.0.1",
+    "playwright-core": "1.63.0",
+    "tough-cookie": "6.0.1"
   }
 }

@@ -6,7 +6,12 @@
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "health": "tsx src/health.ts"
+    "health": "tsx src/health.ts",
+    "qoj:debug": "tsx --env-file-if-exists=../../.env src/qoj-debug.ts"
   },
-  "dependencies": { "@acm/core": "workspace:*", "@acm/db": "workspace:*", "tsx": "4.23.15" }
+  "dependencies": {
+    "@acm/core": "workspace:*",
+    "@acm/db": "workspace:*",
+    "tsx": "4.23.15"
+  }
 }

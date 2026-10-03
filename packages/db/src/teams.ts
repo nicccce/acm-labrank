@@ -2,12 +2,12 @@ import type { PoolClient } from 'pg';
 import { getPool } from './client';
 import { personTotalsSql, type PersonScoreRow, type QueryRange } from './personal-queries';
 
-export interface TeamRow { id: string; name: string; ownerId: string; version: number; archivedAt: Date | null; createdAt: Date }
+export interface TeamRow { id: string; name: string; version: number; archivedAt: Date | null; createdAt: Date }
 export interface TeamMemberRow { id: string; username: string; realName: string | null; verifiedCfHandle: string | null; active: boolean }
 export class TeamStateError extends Error {
   constructor(public readonly code: string, public readonly teamId?: string) { super(code); }
 }
-const columns = `id,name,owner_id AS "ownerId",version,archived_at AS "archivedAt",created_at AS "createdAt"`;
+const columns = `id,name,version,archived_at AS "archivedAt",created_at AS "createdAt"`;
 async function transaction<T>(fn: (client: PoolClient) => Promise<T>) {
   const client = await getPool().connect();
   try {
@@ -30,60 +30,68 @@ async function activeUsers(client: PoolClient, ids: string[]) {
 async function event(client: PoolClient, id: string, actorId: string, action: string, details: object) {
   await client.query('INSERT INTO team_events(team_id,actor_id,action,details,created_at) VALUES ($1,$2,$3,$4,clock_timestamp())', [id, actorId, action, JSON.stringify(details)]);
 }
-async function lockedTeam(client: PoolClient, id: string, version: number) {
+async function lockedTeam(client: PoolClient, id: string, actorId: string, version: number, allowArchived = false) {
   const team = (await client.query<TeamRow>(`SELECT ${columns} FROM teams WHERE id=$1 FOR UPDATE`, [id])).rows[0];
   if (!team) throw new TeamStateError('TEAM_NOT_FOUND');
+  const members = await roster(client, id);
+  if (!members.includes(actorId)) throw new TeamStateError('TEAM_FORBIDDEN');
   if (team.version !== version) throw new TeamStateError('TEAM_STALE');
-  if (team.archivedAt) throw new TeamStateError('TEAM_ARCHIVED');
-  return team;
+  if (team.archivedAt && !allowArchived) throw new TeamStateError('TEAM_ARCHIVED');
+  return { team, members };
 }
 export async function createTeamRecord(actorId: string, name: string, memberIds: string[]) {
   return transaction(async client => {
+    if (!memberIds.includes(actorId)) throw new TeamStateError('TEAM_FORBIDDEN');
     await activeUsers(client, memberIds);
-    const existing = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1 AND archived_at IS NULL', [rosterKey(memberIds)])).rows[0];
+    const existing = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1', [rosterKey(memberIds)])).rows[0];
     if (existing) return { id: existing.id, created: false };
-    const team = (await client.query<{ id: string }>('INSERT INTO teams(name,owner_id,roster_key) VALUES ($1,$2,$3) RETURNING id', [name, actorId, rosterKey(memberIds)])).rows[0]!;
+    const team = (await client.query<{ id: string }>('INSERT INTO teams(name,roster_key) VALUES ($1,$2) RETURNING id', [name, rosterKey(memberIds)])).rows[0]!;
     await client.query('INSERT INTO team_memberships(team_id,user_id,joined_at) SELECT $1,unnest($2::uuid[]),clock_timestamp()', [team.id, memberIds]);
     await event(client, team.id, actorId, 'create', { memberIds });
     return { id: team.id, created: true };
   });
 }
-export async function updateTeamRecord(id: string, actorId: string, input: { name: string; memberIds: string[]; ownerId: string; version: number }) {
+export async function updateTeamRecord(id: string, actorId: string, input: { name: string; memberIds: string[]; version: number }) {
   return transaction(async client => {
-    const team = await lockedTeam(client, id, input.version);
-    if (team.ownerId !== actorId) throw new TeamStateError('TEAM_FORBIDDEN');
+    const { members: previous } = await lockedTeam(client, id, actorId, input.version);
     await activeUsers(client, input.memberIds);
-    const duplicate = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1 AND archived_at IS NULL AND id<>$2', [rosterKey(input.memberIds), id])).rows[0];
+    const duplicate = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1 AND id<>$2', [rosterKey(input.memberIds), id])).rows[0];
     if (duplicate) throw new TeamStateError('TEAM_DUPLICATE', duplicate.id);
-    const previous = await roster(client, id);
     await client.query('UPDATE team_memberships SET left_at=clock_timestamp() WHERE team_id=$1 AND left_at IS NULL AND NOT (user_id=ANY($2::uuid[]))', [id, input.memberIds]);
     await client.query('INSERT INTO team_memberships(team_id,user_id,joined_at) SELECT $1,m,clock_timestamp() FROM unnest($2::uuid[]) AS m WHERE NOT EXISTS (SELECT 1 FROM team_memberships WHERE team_id=$1 AND user_id=m AND left_at IS NULL)', [id, input.memberIds]);
-    await client.query('UPDATE teams SET name=$2,owner_id=$3,roster_key=$4,version=version+1 WHERE id=$1', [id, input.name, input.ownerId, rosterKey(input.memberIds)]);
-    await event(client, id, actorId, 'update', { before: previous, after: input.memberIds, previousOwnerId: team.ownerId, ownerId: input.ownerId });
+    await client.query('UPDATE teams SET name=$2,roster_key=$3,version=version+1 WHERE id=$1', [id, input.name, rosterKey(input.memberIds)]);
+    await event(client, id, actorId, 'update', { before: previous, after: input.memberIds, name: input.name });
     return { id };
   });
 }
 export async function archiveTeamRecord(id: string, actorId: string, version: number) {
   return transaction(async client => {
-    const team = await lockedTeam(client, id, version);
-    if (team.ownerId !== actorId) throw new TeamStateError('TEAM_FORBIDDEN');
+    const { members } = await lockedTeam(client, id, actorId, version);
     await client.query('UPDATE teams SET archived_at=clock_timestamp(),version=version+1 WHERE id=$1', [id]);
-    await event(client, id, actorId, 'archive', { memberIds: await roster(client, id) });
+    await event(client, id, actorId, 'archive', { memberIds: members });
     return { id, archived: true };
+  });
+}
+export async function deleteTeamRecord(id: string, actorId: string, version: number) {
+  return transaction(async client => {
+    await lockedTeam(client, id, actorId, version, true);
+    await client.query('DELETE FROM team_events WHERE team_id=$1', [id]);
+    await client.query('DELETE FROM team_memberships WHERE team_id=$1', [id]);
+    await client.query('DELETE FROM teams WHERE id=$1', [id]);
+    return { id, deleted: true };
   });
 }
 export async function leaveTeamRecord(id: string, actorId: string, version: number) {
   return transaction(async client => {
-    const team = await lockedTeam(client, id, version), previous = await roster(client, id);
-    if (!previous.includes(actorId)) throw new TeamStateError('TEAM_FORBIDDEN');
-    if (team.ownerId === actorId) throw new TeamStateError('TEAM_OWNER_EXIT');
+    const { members: previous } = await lockedTeam(client, id, actorId, version);
     const remaining = previous.filter(member => member !== actorId);
-    const duplicate = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1 AND archived_at IS NULL AND id<>$2', [rosterKey(remaining), id])).rows[0];
-    const archived = remaining.length < 2 || !!duplicate;
+    const duplicate = (await client.query<{ id: string }>('SELECT id FROM teams WHERE roster_key=$1 AND id<>$2', [rosterKey(remaining), id])).rows[0];
+    if (duplicate) throw new TeamStateError('TEAM_DUPLICATE', duplicate.id);
+    const archived = remaining.length < 2;
     await client.query('UPDATE team_memberships SET left_at=clock_timestamp() WHERE team_id=$1 AND user_id=$2 AND left_at IS NULL', [id, actorId]);
     await client.query('UPDATE teams SET roster_key=$2,archived_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,version=version+1 WHERE id=$1', [id, rosterKey(remaining), archived]);
-    await event(client, id, actorId, 'leave', { before: previous, after: remaining, archived, duplicateTeamId: duplicate?.id ?? null });
-    return { id, archived, duplicateTeamId: duplicate?.id ?? null };
+    await event(client, id, actorId, 'leave', { before: previous, after: remaining, archived });
+    return { id, archived };
   });
 }
 export async function getTeamRecord(id: string): Promise<TeamRow | null> {

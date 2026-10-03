@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getPool } from './client';
 
 // Increment when adding a business migration. Older/newer schemas require an explicit deployment.
-export const EXPECTED_MIGRATIONS = 10;
+export const EXPECTED_MIGRATIONS = 11;
 // pg-boss 12.35.1 uses schema 43; update together with the locked library.
 export const EXPECTED_QUEUE_SCHEMA = 43;
 

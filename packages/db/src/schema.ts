@@ -26,11 +26,10 @@ export const sessions = pgTable('sessions', {
 
 export const teams = pgTable('teams', {
   id: uuid('id').defaultRandom().primaryKey(), name: text('name').notNull(),
-  ownerId: uuid('owner_id').notNull().references(() => users.id),
   rosterKey: text('roster_key').notNull(), version: integer('version').default(1).notNull(),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, t => [uniqueIndex('team_active_roster').on(t.rosterKey).where(sql`${t.archivedAt} IS NULL`), check('team_values', sql`length(btrim(${t.name})) BETWEEN 1 AND 64 AND ${t.version}>0`)]);
+}, t => [uniqueIndex('team_roster_unique').on(t.rosterKey), check('team_values', sql`length(btrim(${t.name})) BETWEEN 1 AND 64 AND ${t.version}>0`)]);
 export const teamMemberships = pgTable('team_memberships', {
   id: uuid('id').defaultRandom().primaryKey(), teamId: uuid('team_id').notNull().references(() => teams.id),
   userId: uuid('user_id').notNull().references(() => users.id),

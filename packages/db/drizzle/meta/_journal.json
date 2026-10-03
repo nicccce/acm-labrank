@@ -71,6 +71,13 @@
       "when": 1791046627418,
       "tag": "0009_cf_shared_credit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791049548317,
+      "tag": "0010_equal_team_members",
+      "breakpoints": true
     }
   ]
 }

@@ -65,7 +65,7 @@ try {
   await rebuild([accounts[2]!]); await rebuild([accounts[2]!]);
   assert.equal((await pool.query('SELECT count(*)::int AS n FROM submission_attributions')).rows[0].n, 6);
   near((await queryLeaderboard(range)).find(u => u.id === users[2])!.points, 5 / 3);
-  const teamId = (await pool.query<{ id: string }>("INSERT INTO teams(name,owner_id,roster_key) VALUES ('ABC',$1,$2) RETURNING id", [users[0], [...users].sort().join(':')])).rows[0]!.id;
+  const teamId = (await pool.query<{ id: string }>("INSERT INTO teams(name,roster_key) VALUES ('ABC',$1) RETURNING id", [[...users].sort().join(',')])).rows[0]!.id;
   for (const user of users) await pool.query('INSERT INTO team_memberships(team_id,user_id) VALUES ($1,$2)', [teamId, user]);
   near((await queryTeamScore(teamId, range)).points, 5);
   assert.equal((await queryTeamScore(teamId, range)).solveCount, 3);

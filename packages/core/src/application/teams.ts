@@ -1,40 +1,44 @@
 import { z } from 'zod';
-import { archiveTeamRecord, createTeamRecord, getCollectionSettings, getTeamMembers, getTeamMembersBatch, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
+import { archiveTeamRecord, createTeamRecord, deleteTeamRecord, getCollectionSettings, getTeamMembers, getTeamMembersBatch, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
 import { displayName } from '../domain';
 import { AppError } from './errors';
 import { parsePersonalQuery, queryMeta } from './scores/query';
 
 const id = z.uuid().transform(v => v.toLowerCase());
 export const createTeamSchema = z.object({ name: z.string().trim().min(1).max(64), memberIds: z.array(id).min(2).max(3) }).strict();
-const updateTeamSchema = createTeamSchema.extend({ ownerId: id, version: z.number().int().positive() }).strict();
+const updateTeamSchema = createTeamSchema.extend({ version: z.number().int().positive() }).strict();
 const versionSchema = z.object({ version: z.number().int().positive() }).strict();
 function validId(value: string) {
   const parsed = id.safeParse(value); if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍 ID 不合法', 400); return parsed.data;
 }
-function validateRoster(ids: string[], ownerId: string) {
+function validateRoster(ids: string[]) {
   if (new Set(ids).size !== ids.length) throw new AppError('INVALID_INPUT', '不能重复选择成员', 400);
-  if (!ids.includes(ownerId)) throw new AppError('INVALID_INPUT', '负责人必须是队伍成员', 400);
 }
 async function call<T>(fn: () => Promise<T>) {
   try { return await fn(); } catch (error) {
     if (!(error instanceof TeamStateError)) throw error;
-    const messages: Record<string, string> = { INVALID_MEMBERS: '成员不存在或已停用', TEAM_NOT_FOUND: '队伍不存在', TEAM_FORBIDDEN: '无权操作该队伍', TEAM_STALE: '队伍已变化，请刷新', TEAM_ARCHIVED: '队伍已归档', TEAM_DUPLICATE: '已存在相同成员的队伍', TEAM_OWNER_EXIT: '请先转移负责人或归档队伍' };
+    const messages: Record<string, string> = { INVALID_MEMBERS: '成员不存在或已停用', TEAM_NOT_FOUND: '队伍不存在', TEAM_FORBIDDEN: '仅当前队伍成员可以操作', TEAM_STALE: '队伍已变化，请刷新', TEAM_ARCHIVED: '队伍已归档', TEAM_DUPLICATE: '已存在相同成员的队伍（含已归档队伍）' };
     throw new AppError(error.code, messages[error.code] ?? '队伍操作失败', error.code === 'TEAM_NOT_FOUND' ? 404 : error.code === 'TEAM_FORBIDDEN' ? 403 : error.code === 'INVALID_MEMBERS' ? 400 : 409, undefined, error.teamId);
   }
 }
 export async function createTeam(actorId: string, input: unknown) {
   const parsed = createTeamSchema.safeParse(input); if (!parsed.success) throw new AppError('INVALID_INPUT', '请输入队名并选择 2—3 位不重复的成员', 400);
-  validateRoster(parsed.data.memberIds, actorId);
+  validateRoster(parsed.data.memberIds);
+  if (!parsed.data.memberIds.includes(actorId)) throw new AppError('INVALID_INPUT', '创建者必须是队伍成员', 400);
   return call(() => createTeamRecord(actorId, parsed.data.name, parsed.data.memberIds));
 }
 export async function updateTeam(teamId: string, actorId: string, input: unknown) {
   const parsed = updateTeamSchema.safeParse(input); if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍资料或版本不合法', 400);
-  validateRoster(parsed.data.memberIds, parsed.data.ownerId);
+  validateRoster(parsed.data.memberIds);
   return call(() => updateTeamRecord(validId(teamId), actorId, parsed.data));
 }
 export async function archiveTeam(teamId: string, actorId: string, input: unknown) {
   const parsed = versionSchema.safeParse(input); if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍版本不合法', 400);
   return call(() => archiveTeamRecord(validId(teamId), actorId, parsed.data.version));
+}
+export async function deleteTeam(teamId: string, actorId: string, input: unknown) {
+  const parsed = versionSchema.safeParse(input); if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍版本不合法', 400);
+  return call(() => deleteTeamRecord(validId(teamId), actorId, parsed.data.version));
 }
 export async function leaveTeam(teamId: string, actorId: string, input: unknown) {
   const parsed = versionSchema.safeParse(input); if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍版本不合法', 400);

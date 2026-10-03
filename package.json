@@ -32,6 +32,7 @@
     "members:seed": "tsx --env-file-if-exists=.env scripts/seed-members.ts",
     "personal:probe": "tsx --env-file-if-exists=.env scripts/personal-probe.ts",
     "personal:verify": "tsx --env-file-if-exists=.env scripts/verify-personal.ts",
+    "teams:verify": "tsx --env-file-if-exists=.env scripts/verify-teams.ts",
     "web:probe": "tsx --env-file-if-exists=.env scripts/web-probe.ts"
   },
   "devDependencies": {

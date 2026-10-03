@@ -56,7 +56,7 @@ async function evaluate(expression) {
 try {
   if (reloadWorker && !await evaluate("typeof process.execve === 'function'")) throw new Error('WORKER_RELOAD_UNSUPPORTED');
   if (upstream) {
-    const proxyEnv = { HTTP_PROXY: upstream, HTTPS_PROXY: upstream, NO_PROXY: 'localhost,127.0.0.1,::1,web,worker,db,qoj-relay' };
+    const proxyEnv = { HTTP_PROXY: upstream, HTTPS_PROXY: upstream, NO_PROXY: 'localhost,127.0.0.1,::1,web,worker,db' };
     const result = await evaluate(`(() => { const settings = ${JSON.stringify(proxyEnv)}; Object.assign(process.env, settings, { NODE_USE_ENV_PROXY: '1' }); process.getBuiltinModule('node:http').setGlobalProxyFromEnv(settings); return { applied: true }; })()`);
     if (!result?.applied) throw new Error('NETWORK_APPLY_FAILED');
     console.log(JSON.stringify({ event: 'worker_network_applied', browserRestarted: false, inspectorPublished: false }));

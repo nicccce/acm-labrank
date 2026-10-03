@@ -12,5 +12,10 @@ services:
   migrate: *local
   bootstrap: *local
   web: *local
-  worker: *local
   seed: *local
+  worker:
+    image: acm-leaderboard:worker
+    pull_policy: never
+    build:
+      context: .
+      target: worker-browser

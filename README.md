@@ -17,7 +17,7 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 
 ## 部署方式一：Compose 直接拉取镜像
 
-需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `2026.10.03`，发布平台为 `linux/amd64`。普通镜像包含 Web、worker、迁移及管理员初始化；`qoj-browser-2026.10.03` 额外包含 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
+需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `2026.10.04`，发布平台为 `linux/amd64`。应用镜像 `2026.10.04` 负责 Web、迁移及管理员初始化；通用采集镜像 `worker-2026.10.04` 同时负责 Codeforces、洛谷和 QOJ，并内置 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
 
 Linux 服务器执行：
 
@@ -26,7 +26,7 @@ git clone https://github.com/nicccce/acm-labrank.git
 cd acm-labrank
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$PWD,target=/deployment" \
-  --entrypoint node nicccce/acm-labrank:2026.10.03 \
+  --entrypoint node nicccce/acm-labrank:2026.10.04 \
   scripts/setup.mjs --directory /deployment
 # 编辑 .env：本地测试保留 APP_URL；公网部署设为实际 HTTPS 地址
 docker compose pull
@@ -38,14 +38,7 @@ Windows / Docker Desktop 可先用 Node.js 22+ 执行 `node scripts/setup.mjs`�
 
 默认访问 <http://localhost:3000>。管理员用户名见 `.env` 的 `ADMIN_BOOTSTRAP_USERNAME`，初始密码从 `.secrets/admin-bootstrap-password` 本地读取。正式部署通过反向代理提供 HTTPS，`APP_URL` 必须与浏览器访问地址一致；默认 Web 端口只绑定宿主 `127.0.0.1:3000`，数据库不向宿主发布。
 
-需要 QOJ 时追加浏览器配置：
-
-```bash
-docker compose -f compose.yaml -f compose.qoj-browser.yaml pull
-docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
-```
-
-打开 `/admin/connections`，在专用桌面人工登录并核验。远程服务器通过 SSH 隧道访问回环端口 3000/6080，详细操作见[部署与运维](docs/部署与运维.md)。初次迁移暂停采集、关闭自动同步，默认只启用 Codeforces；确认成员账号后，在 `/admin/collection` 启用。洛谷/QOJ 先完成登录和核验，再加入采集。
+标准 Compose 已包含唯一的通用 Worker，不需要追加 QOJ 覆盖文件。正式运行时有 3 个长期容器：Web、Worker 和 PostgreSQL；`migrate`、`bootstrap` 只是启动阶段执行完即退出的一次性容器。打开 `/admin/connections`，在 Worker 提供的专用桌面人工登录并核验 QOJ。远程服务器通过 SSH 隧道访问回环端口 3000/6080，详细操作见[部署与运维](docs/部署与运维.md)。初次迁移暂停采集、关闭自动同步，默认只启用 Codeforces；确认成员账号后，在 `/admin/collection` 启用。洛谷/QOJ 先完成登录和核验，再加入采集。
 
 ## 部署方式二：自己打包镜像
 
@@ -57,16 +50,7 @@ docker compose -f compose.yaml -f compose.build.yaml build
 docker compose -f compose.yaml -f compose.build.yaml up -d --wait
 ```
 
-需要自行构建 QOJ 浏览器镜像时，四份配置按下列顺序使用：
-
-```bash
-docker compose -f compose.yaml -f compose.build.yaml \
-  -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml build
-docker compose -f compose.yaml -f compose.build.yaml \
-  -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml up -d --wait
-```
-
-普通镜像打包为 `acm-leaderboard:local`，浏览器镜像为 `acm-leaderboard:qoj-browser`。也可直接执行 `docker build --target runtime -t acm-leaderboard:local .` 或 `docker build --target worker-browser -t acm-leaderboard:qoj-browser .`。构建按锁文件安装依赖，执行类型检查及生产构建；后续启动仍使用对应的 build 覆盖配置。发布到自己的 Docker Hub、修改镜像标签及构建网络参数见[部署与运维](docs/部署与运维.md)。
+`compose.build.yaml` 会构建两个本地镜像：应用镜像 `acm-leaderboard:local` 和通用采集镜像 `acm-leaderboard:worker`。也可直接执行 `docker build --target runtime -t acm-leaderboard:local .` 或 `docker build --target worker-browser -t acm-leaderboard:worker .`。构建按锁文件安装依赖，执行类型检查及生产构建；后续启动仍使用 build 覆盖配置。发布到自己的 Docker Hub、修改镜像标签及构建网络参数见[部署与运维](docs/部署与运维.md)。
 
 ## 结构与依赖
 

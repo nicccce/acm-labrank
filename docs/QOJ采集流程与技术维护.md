@@ -54,11 +54,11 @@ docker logs --tail 20 acm-leaderboard-worker-1
 
 ```powershell
 node scripts/setup.mjs
-docker compose -f compose.yaml -f compose.qoj-browser.yaml pull
-docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
+docker compose pull
+docker compose up -d --wait
 ```
 
-普通 runtime 镜像不包含 Chromium。自行构建时追加 `compose.build.yaml` 与 `compose.qoj-browser.build.yaml`，顺序见[部署与运维](部署与运维.md)。拉取或构建新镜像本身不会替换正在运行的容器；后续 up/recreate 才是部署动作。涉及数据库迁移时先暂停采集、备份并停止旧 worker，再部署匹配版本。
+通用 Worker 镜像包含 Chromium，并负责 CF、洛谷和 QOJ。自行构建时只需追加 `compose.build.yaml`，顺序见[部署与运维](部署与运维.md)。拉取或构建新镜像本身不会替换正在运行的容器；后续 up/recreate 才是部署动作。涉及数据库迁移时先暂停采集、备份并停止旧 worker，再部署匹配版本。
 
 ### 启动未接管的专用浏览器
 
@@ -76,7 +76,7 @@ services:
 再启动尚未接管的 Worker：
 
 ```powershell
-docker compose -f compose.yaml -f compose.qoj-browser.yaml -f .local/qoj-manual.compose.yaml up -d --no-deps --no-build worker
+docker compose -f compose.yaml -f .local/qoj-manual.compose.yaml up -d --no-deps --no-build worker
 docker logs --tail 10 acm-leaderboard-worker-1
 ```
 
@@ -203,7 +203,7 @@ CDP 读取保持实际浏览器身份，不覆盖 UA，也不清空或导入数�
 
 | 维护内容 | 文件入口 |
 | --- | --- |
-| 浏览器启动、桌面与进程监督 | [qoj-container.mjs](../scripts/qoj-container.mjs)、[Dockerfile](../Dockerfile)、[Compose 覆盖配置](../compose.qoj-browser.yaml) |
+| 浏览器启动、桌面与进程监督 | [qoj-container.mjs](../scripts/qoj-container.mjs)、[Dockerfile](../Dockerfile)、[Compose 配置](../compose.yaml) |
 | CDP、真实导航、会话和断开 | [qoj-browser.ts](../packages/core/src/application/platforms/qoj/browser.ts) |
 | 任务锁、预算、人工处理与结果 | [qoj-worker.ts](../packages/core/src/application/platforms/qoj/worker.ts) |
 | 一次性接管确认 | [qoj-browser-attach.ts](../packages/core/src/application/platforms/qoj/browser-attach.ts)、[qoj-confirm.ts](../scripts/qoj-confirm.ts) |
@@ -239,9 +239,7 @@ QOJ_LOGIN_HANDLE 可在应用处理器中限制采集身份；当前浏览器 Co
 | qoj_debug_failed | 检查参数、state目标/模式、checkpoint格式、Secret和CDP地址。先看配置，不重启已登录浏览器。 |
 | CLI 已输出结果但不退出 | 核对是否使用有 CDP 断开修复的代码，不调用默认 context.close 或强杀浏览器。 |
 
-`compose.qoj-browser.yaml` 默认启动内部 `qoj-relay`。它只允许到 QOJ 与 Cloudflare challenge 的 TLS CONNECT，不解密 TLS，也不接触密码或响应正文。如果 Docker 能建立 TCP 却无法完成 TLS，而宿主机代理可以访问，在 `.env` 设置 `QOJ_RELAY_UPSTREAM=http://host.docker.internal:7890`（端口按本机配置），执行 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --no-deps --force-recreate qoj-relay`。只替换中继，浏览器及已登录状态保留，然后刷新 QOJ 页面。中继脚本随镜像发布，代理连接超时或拒绝返回 502。
-
-`QOJ_BROWSER_PROXY_SERVER` 用于替换 Chromium 本身的代理入口；修改它需要重启浏览器，应安排重新人工登录。优先通过 `QOJ_RELAY_UPSTREAM` 调整出口，宿主机代理必须保持运行。
+Worker 默认由 Chromium 直接访问 QOJ，仓库不再提供或启动专用 relay。服务器确实需要代理时，在 `.env` 设置标准的 `QOJ_BROWSER_PROXY_SERVER=http://approved-proxy:port`，再重建 Worker；该配置不能包含凭据、路径、查询或 fragment。修改浏览器代理会重启 Chromium，应安排重新人工登录，且代理服务必须由部署方独立维护。
 
 取消单项正式任务应使用 pg-boss 的 `boss.cancel(QOJ_READ_QUEUE, jobId)`，由 job.signal 和 heartbeat 通知 Worker 释放页面；不要停止整个 Worker 容器。`pnpm qoj:cancel-probe` 会另建真实测试任务，不是取消任意现有 job 的命令。直接 CLI 可用交互式 Ctrl+C 取消；不要手动删除正在使用的 state 文件或确认文件。
 
@@ -252,8 +250,8 @@ QOJ_LOGIN_HANDLE 可在应用处理器中限制采集身份；当前浏览器 Co
 新环境网络正常时可构建新镜像，再在独立一次性容器中检查，不替换当前登录浏览器：
 
 ```powershell
-docker compose -f compose.yaml -f compose.build.yaml -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml build worker
-docker run --rm --entrypoint sh acm-leaderboard:qoj-browser -c 'mkdir -p "$TMPDIR" && pnpm check'
+docker compose -f compose.yaml -f compose.build.yaml build worker
+docker run --rm --entrypoint sh acm-leaderboard:worker -c 'mkdir -p "$TMPDIR" && pnpm check'
 ```
 
 Dockerfile 的 build 阶段已执行 TypeScript 和 pnpm build。构建通过后，只有在接受当前会话丢失时才部署新容器，并重复人工登录与两页真实读取。文档改动只检查内容、路径、命令和 diff，不需要重建应用。

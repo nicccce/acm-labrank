@@ -1,7 +1,7 @@
 name: acm-leaderboard
 
 x-app: &app
-  image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:${ACM_IMAGE_TAG:-2026.10.03}
+  image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:${ACM_IMAGE_TAG:-2026.10.04}
   init: true
   environment: &app-env
     NODE_ENV: production
@@ -20,7 +20,7 @@ x-app: &app
     NODE_USE_ENV_PROXY: ${NODE_USE_ENV_PROXY:-0}
     HTTPS_PROXY: ${PLATFORM_HTTPS_PROXY:-}
     HTTP_PROXY: ${PLATFORM_HTTPS_PROXY:-}
-    NO_PROXY: localhost,127.0.0.1,::1,web,worker,db,qoj-relay
+    NO_PROXY: localhost,127.0.0.1,::1,web,worker,db
   logging:
     driver: json-file
     options:
@@ -96,10 +96,36 @@ services:
 
   worker:
     <<: *app
+    image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:worker-${ACM_IMAGE_TAG:-2026.10.04}
     command: ["pnpm", "--filter", "@acm/worker", "start"]
     restart: unless-stopped
+    environment:
+      <<: *app-env
+      QOJ_TRANSPORT: browser
+      QOJ_BROWSER_EXECUTABLE: /usr/bin/chromium
+      QOJ_BROWSER_HEADED: "true"
+      QOJ_BROWSER_MANUAL_START: "false"
+      QOJ_HUMAN_RETRIES: "0"
+      QOJ_BROWSER_START_TARGET: ${QOJ_BROWSER_START_TARGET:-muhammad}
+      QOJ_BROWSER_PROXY_SERVER: ${QOJ_BROWSER_PROXY_SERVER:-}
+      QOJ_HTTP_TIMEOUT_MS: ${QOJ_HTTP_TIMEOUT_MS:-30000}
+      QOJ_HTTP_RETRIES: ${QOJ_HTTP_RETRIES:-2}
+      QOJ_HUMAN_TIMEOUT_MS: ${QOJ_HUMAN_TIMEOUT_MS:-120000}
+      QOJ_HUMAN_CONFIRM_FILE: /app/.local/qoj-confirm.json
+      QOJ_VNC_PASSWORD_FILE: /run/secrets/qoj_vnc_password
     secrets:
       - session_encryption_key
+      - qoj_vnc_password
+    ports:
+      - "127.0.0.1:${QOJ_DESKTOP_PORT:-6080}:6080"
+    shm_size: 1gb
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+      - /app/.local:rw,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700
+      - /app/apps/worker/.local:rw,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
     depends_on:
       bootstrap: { condition: service_completed_successfully }
     healthcheck:
@@ -119,3 +145,5 @@ secrets:
     file: ${ADMIN_BOOTSTRAP_PASSWORD_FILE:-./.secrets/admin-bootstrap-password}
   member_test_password:
     file: ./.secrets/member-test-password
+  qoj_vnc_password:
+    file: ${QOJ_VNC_PASSWORD_FILE:-./.secrets/qoj-vnc-password}

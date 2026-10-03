@@ -1,0 +1,16 @@
+# Source builds: docker compose -f compose.yaml -f compose.build.yaml up -d --build
+x-build: &build
+  context: .
+  target: runtime
+
+x-local: &local
+  image: acm-leaderboard:local
+  pull_policy: never
+  build: *build
+
+services:
+  migrate: *local
+  bootstrap: *local
+  web: *local
+  worker: *local
+  seed: *local

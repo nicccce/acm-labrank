@@ -6,7 +6,8 @@
 
 ```powershell
 node scripts/setup.mjs
-docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build
+docker compose -f compose.yaml -f compose.qoj-browser.yaml pull
+docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
 docker compose run --rm --no-deps seed
 ```
 
@@ -94,15 +95,7 @@ docker compose run --rm --no-deps --entrypoint pnpm web personal:verify
 
 需要在当前 Chromium 登录会话中更新 worker 时，先暂停采集并确认没有活动任务，只复制源码文件（不要复制 Windows 的 `node_modules`），完成迁移及离线测试后，可在 Linux Node 24 容器内使用 `scripts/worker-network-hot-apply.mjs --reload-worker`。该选项用 `execve` 原位替换 Node worker，保持 PID、Chromium、noVNC 及数据库卷；只开启并关闭容器内部本地调试连接，不发布新端口。仅原位更新时保留进程原有网络设置；若同时配置 `PLATFORM_HTTPS_PROXY`，也会更新代理调度器。后续正常镜像构建仍须包含更新后的源码。
 
-本机 Docker 出网受限时可复用已安装依赖的镜像：
-
-```powershell
-docker tag acm-leaderboard:local acm-leaderboard:cache-app
-docker tag acm-leaderboard:qoj-browser acm-leaderboard:cache-browser
-docker compose -f compose.yaml -f compose.qoj-browser.yaml -f compose.cached.yaml build web worker
-```
-
-缓存构建要求浏览器缓存镜像的锁文件与当前源码完全一致，仍重新运行类型检查和生产构建；依赖变化时使用正常 Dockerfile 安装新依赖。它不把旧编译产物当成新的实现。
+常规安装直接拉取 Docker Hub 的匹配镜像；源码构建追加 `compose.build.yaml`，QOJ 再追加 `compose.qoj-browser.build.yaml`，完整命令见[部署与运维](部署与运维.md)。依赖本机历史镜像的缓存构建文件已移除。网络受限时使用发布镜像或向标准 Dockerfile 指定可信源。
 
 Docker Desktop 无法直连平台时，可复用宿主机现有 HTTP 代理：在本地 `.env` 设置 `NODE_USE_ENV_PROXY=1` 和 `PLATFORM_HTTPS_PROXY=http://host.docker.internal:7890`。Web/普通 worker 使用 Node 24 的内置环境代理，`NO_PROXY` 排除本站及内部容器请求；保持宿主机代理运行。QOJ 的 `QOJ_RELAY_UPSTREAM` 由其独立中继配置维护，无需更改或重建浏览器容器。
 

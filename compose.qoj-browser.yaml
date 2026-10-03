@@ -1,16 +1,14 @@
 # Opt-in container-owned Chromium desktop; never mounts a host browser profile.
-# docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build worker
+# docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d
 services:
   qoj-relay:
-    image: acm-leaderboard:qoj-browser
+    image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:qoj-browser-${ACM_IMAGE_TAG:-2026.10.03}
     entrypoint: ["node", "scripts/qoj-connect-proxy.mjs"]
     restart: unless-stopped
     init: true
     environment:
       QOJ_RELAY_PORT: "3875"
       QOJ_RELAY_UPSTREAM: ${QOJ_RELAY_UPSTREAM:-}
-    volumes:
-      - ./scripts/qoj-connect-proxy.mjs:/app/scripts/qoj-connect-proxy.mjs:ro
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=16m,mode=1777
@@ -18,9 +16,7 @@ services:
       - ALL
 
   worker:
-    image: acm-leaderboard:qoj-browser
-    build:
-      target: worker-browser
+    image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:qoj-browser-${ACM_IMAGE_TAG:-2026.10.03}
     environment:
       QOJ_TRANSPORT: browser
       QOJ_CONNECTION_ID: ${QOJ_CONNECTION_ID:-qoj-lab}

@@ -3,8 +3,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 
-const root = resolve(import.meta.dirname, '..');
+const sourceRoot = resolve(import.meta.dirname, '..');
+const { values } = parseArgs({ options: { directory: { type: 'string' } } });
+const root = values.directory ? resolve(values.directory) : sourceRoot;
 const secrets = resolve(root, '.secrets');
 await mkdir(secrets, { recursive: true, mode: 0o700 });
 for (const [name, bytes] of [['session-encryption-key', 32], ['admin-bootstrap-password', 24], ['member-test-password', 24], ['qoj-vnc-password', 6]]) {
@@ -18,12 +21,15 @@ if (process.platform === 'win32') {
   execFileSync('icacls', [secrets, '/inheritance:r', '/grant:r', ...principals, 'SYSTEM:(OI)(CI)F'], { stdio: 'ignore' });
 } else {
   await chmod(secrets, 0o700);
-  for (const name of ['session-encryption-key', 'admin-bootstrap-password', 'member-test-password', 'qoj-vnc-password']) await chmod(resolve(secrets, name), 0o600);
+  // Compose bind-mounts each secret file without remapping its owner. The
+  // protected parent directory prevents other host users from reading files,
+  // while 0444 lets the non-root container read its individually mounted secret.
+  for (const name of ['session-encryption-key', 'admin-bootstrap-password', 'member-test-password', 'qoj-vnc-password']) await chmod(resolve(secrets, name), 0o444);
 }
 const envPath = resolve(root, '.env');
 if (!existsSync(envPath)) {
   const password = randomBytes(24).toString('hex');
-  const template = await readFile(resolve(root, '.env.example'), 'utf8');
+  const template = await readFile(resolve(sourceRoot, '.env.example'), 'utf8');
   await writeFile(envPath, template.replaceAll('replace-with-random-password', password), { flag: 'wx', mode: 0o600 });
   console.log('Created .env with random local database credentials.');
 } else { console.log('Preserved existing .env.'); }

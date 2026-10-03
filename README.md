@@ -5,6 +5,7 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 ## 文档入口
 
 - [文档索引](docs/README.md)：当前维护文档与历史记录。
+- [部署与运维](docs/部署与运维.md)：镜像部署、源码打包、QOJ 浏览器、备份、升级与故障排查。
 - [个人后端与 Web 登录](docs/个人后端与Web登录.md)：本轮 API、管理员交接、采集开关和离线集成验证。
 - [成员页面与团队榜](docs/成员页面与团队榜.md)：页面、团队计分、去重和接口。
 - [管理员采集管理](docs/管理员采集管理.md)：管理页、定时增量、计分区间、平台选择和局部重爬。
@@ -12,21 +13,58 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 - [QOJ 运行手册](docs/QOJ采集流程与技术维护.md)：专用浏览器、人工登录、接管与故障处理。
 - 连接器规则：[Codeforces](packages/connectors/src/codeforces/README.md)、[洛谷](packages/connectors/src/luogu/README.md)、[QOJ](packages/connectors/src/qoj/README.md)。
 
-## Docker 启动
+## 部署方式一：Compose 直接拉取镜像
 
-需要 Docker 的 Linux 引擎、Compose 和 Node.js 22+（仅配置生成）；应用镜像固定 Node.js 24.21.0。
+需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `2026.10.03`，发布平台为 `linux/amd64`。普通镜像包含 Web、worker、迁移及管理员初始化；`qoj-browser-2026.10.03` 额外包含 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
 
-```powershell
-node scripts/setup.mjs
-docker compose up -d --build
+Linux 服务器执行：
+
+```bash
+git clone https://github.com/nicccce/acm-labrank.git
+cd acm-labrank
+docker run --rm --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$PWD,target=/deployment" \
+  --entrypoint node nicccce/acm-labrank:2026.10.03 \
+  scripts/setup.mjs --directory /deployment
+# 编辑 .env：本地测试保留 APP_URL；公网部署设为实际 HTTPS 地址
+docker compose pull
+docker compose up -d --wait
 docker compose ps
 ```
 
-默认访问 <http://localhost:3000>。管理员用户名在本地 `.env`，初始密码在受保护的 `.secrets/admin-bootstrap-password`。初始化重复运行保留既有配置；已有管理员时引导跳过。正式部署把 `APP_URL` 配为实际 HTTPS 地址。
+Windows / Docker Desktop 可先用 Node.js 22+ 执行 `node scripts/setup.mjs`，然后执行同样的 `docker compose pull` 和 `docker compose up -d --wait`。初始化会生成随机凭据，重复运行保留已有配置。
 
-本地登录测试使用 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build`。打开 <http://localhost:3000/admin/collection>，默认仅启用 CF，初次迁移暂停采集、关闭自动同步；确认成员绑定后即可启用。需要 QOJ/洛谷时先在 <http://localhost:3000/admin/connections> 登录/核验，再加入采集。`docker compose run --rm --no-deps seed` 创建测试成员及待验证候选；测试密码见 `.secrets/member-test-password`。
+默认访问 <http://localhost:3000>。管理员用户名见 `.env` 的 `ADMIN_BOOTSTRAP_USERNAME`，初始密码从 `.secrets/admin-bootstrap-password` 本地读取。正式部署通过反向代理提供 HTTPS，`APP_URL` 必须与浏览器访问地址一致；默认 Web 端口只绑定宿主 `127.0.0.1:3000`，数据库不向宿主发布。
 
-默认仅发布宿主回环 Web 端口，数据库不发布。QOJ 专用浏览器使用可选 `compose.qoj-browser.yaml`，启动与人工登录见运行手册。网络受限时可向构建传入 `NPM_REGISTRY` 指向可信 HTTPS npm 源；本机历史排障不作为新环境启动前提。
+需要 QOJ 时追加浏览器配置：
+
+```bash
+docker compose -f compose.yaml -f compose.qoj-browser.yaml pull
+docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
+```
+
+打开 `/admin/connections`，在专用桌面人工登录并核验。远程服务器通过 SSH 隧道访问回环端口 3000/6080，详细操作见[部署与运维](docs/部署与运维.md)。初次迁移暂停采集、关闭自动同步，默认只启用 Codeforces；确认成员账号后，在 `/admin/collection` 启用。洛谷/QOJ 先完成登录和核验，再加入采集。
+
+## 部署方式二：自己打包镜像
+
+取得源码后，在仓库根目录生成配置并构建。构建环境只需 Docker；下面用 Node.js 22+ 生成配置，也可以按方式一使用发布镜像运行初始化。
+
+```bash
+node scripts/setup.mjs
+docker compose -f compose.yaml -f compose.build.yaml build
+docker compose -f compose.yaml -f compose.build.yaml up -d --wait
+```
+
+需要自行构建 QOJ 浏览器镜像时，四份配置按下列顺序使用：
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml \
+  -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml build
+docker compose -f compose.yaml -f compose.build.yaml \
+  -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml up -d --wait
+```
+
+普通镜像打包为 `acm-leaderboard:local`，浏览器镜像为 `acm-leaderboard:qoj-browser`。也可直接执行 `docker build --target runtime -t acm-leaderboard:local .` 或 `docker build --target worker-browser -t acm-leaderboard:qoj-browser .`。构建按锁文件安装依赖，执行类型检查及生产构建；后续启动仍使用对应的 build 覆盖配置。发布到自己的 Docker Hub、修改镜像标签及构建网络参数见[部署与运维](docs/部署与运维.md)。
 
 ## 结构与依赖
 
@@ -109,6 +147,6 @@ Compose 按 `db healthy → migrate 成功 → bootstrap 成功 → web / worker
 
 认证入口为 `/api/auth/register`、`login`、`session`、`logout`。写请求校验 Origin；退出及管理员写接口还校验 `X-CSRF-Token`。密码用 Argon2id，会话 token 仅以哈希入库，Cookie 使用 HttpOnly/SameSite=Lax；HTTPS 时 Secure。
 
-发布包含新迁移的版本时，先备份、暂停采集并等待活动任务结束，执行迁移，再部署匹配的新 Web/worker。保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)替换 Node worker，保持容器及 Chromium 运行。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
+发布包含新迁移的版本时，先备份、暂停采集并等待活动任务结束，再按[升级流程](docs/部署与运维.md)部署匹配的新 Web/worker。保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)替换 Node worker，保持容器及 Chromium 运行。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
 
 当前采集策略：首次近 30 天、每批 3 页/120 秒，之后持续增量；榜单日期只控制查询，历史补采单独执行。结构与功能缺口见[项目实现状态](docs/项目实现状态.md)。

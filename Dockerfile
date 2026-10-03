@@ -16,11 +16,16 @@ COPY packages/db/package.json packages/db/package.json
 COPY packages/connectors/package.json packages/connectors/package.json
 RUN pnpm install --frozen-lockfile --registry=$NPM_REGISTRY
 COPY . .
-RUN pnpm typecheck && pnpm build
+RUN pnpm typecheck && pnpm build && rm -rf apps/web/.next/cache
 
 FROM base AS runtime
 ENV NODE_ENV=production
 ENV TZ=UTC
+ARG VCS_REF=unknown
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.version=$APP_VERSION
 COPY --from=build --chown=node:node /app /app
 USER node
 EXPOSE 3000
@@ -39,6 +44,11 @@ RUN sed -i "s|http://deb.debian.org/debian$|${DEBIAN_MIRROR}|;s|http://deb.debia
 FROM browser-system AS worker-browser
 ENV NODE_ENV=production
 ENV TZ=UTC
+ARG VCS_REF=unknown
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.version=$APP_VERSION
 COPY --from=runtime --chown=node:node /app /app
 ENV DISPLAY=:99
 ENV TMPDIR=/tmp/qoj-browser

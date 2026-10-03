@@ -50,14 +50,15 @@ docker logs --tail 20 acm-leaderboard-worker-1
 
 ### 准备应用和浏览器镜像
 
-首次安装按根 [README](../README.md) 完成配置、数据库迁移和管理员引导。`setup` 保留已有 Secret，不输出密码。浏览器 Worker 使用可选镜像目标：
+首次安装按根 [README](../README.md) 完成配置、数据库迁移和管理员引导。`setup` 保留已有 Secret，不输出密码。默认直接拉取浏览器镜像：
 
 ```powershell
 node scripts/setup.mjs
-docker compose -f compose.yaml -f compose.qoj-browser.yaml build worker
+docker compose -f compose.yaml -f compose.qoj-browser.yaml pull
+docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
 ```
 
-普通 runtime 镜像不包含 Chromium。构建新镜像本身不会替换正在运行的容器；后续 up/recreate 才是部署动作。涉及数据库迁移时按采集架构文档先停止旧 worker、迁移，再部署匹配版本。
+普通 runtime 镜像不包含 Chromium。自行构建时追加 `compose.build.yaml` 与 `compose.qoj-browser.build.yaml`，顺序见[部署与运维](部署与运维.md)。拉取或构建新镜像本身不会替换正在运行的容器；后续 up/recreate 才是部署动作。涉及数据库迁移时先暂停采集、备份并停止旧 worker，再部署匹配版本。
 
 ### 启动未接管的专用浏览器
 
@@ -230,7 +231,7 @@ QOJ_LOGIN_HANDLE 可在应用处理器中限制采集身份；当前浏览器 Co
 | qoj_debug_failed | 检查参数、state目标/模式、checkpoint格式、Secret和CDP地址。先看配置，不重启已登录浏览器。 |
 | CLI 已输出结果但不退出 | 核对是否使用有 CDP 断开修复的代码，不调用默认 context.close 或强杀浏览器。 |
 
-`compose.qoj-browser.yaml` 默认启动内部 `qoj-relay`。它只允许到 QOJ 与 Cloudflare challenge 的 TLS CONNECT，不解密 TLS，也不接触密码或响应正文。如果 Docker 能建立 TCP 却无法完成 TLS，而宿主机代理可以访问，在 `.env` 设置 `QOJ_RELAY_UPSTREAM=http://host.docker.internal:7890`（端口按本机配置），执行 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --no-deps --force-recreate qoj-relay`。只替换中继，浏览器及已登录状态保留，然后刷新 QOJ 页面。中继脚本以只读方式挂载，代理连接超时或拒绝返回 502。
+`compose.qoj-browser.yaml` 默认启动内部 `qoj-relay`。它只允许到 QOJ 与 Cloudflare challenge 的 TLS CONNECT，不解密 TLS，也不接触密码或响应正文。如果 Docker 能建立 TCP 却无法完成 TLS，而宿主机代理可以访问，在 `.env` 设置 `QOJ_RELAY_UPSTREAM=http://host.docker.internal:7890`（端口按本机配置），执行 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --no-deps --force-recreate qoj-relay`。只替换中继，浏览器及已登录状态保留，然后刷新 QOJ 页面。中继脚本随镜像发布，代理连接超时或拒绝返回 502。
 
 `QOJ_BROWSER_PROXY_SERVER` 用于替换 Chromium 本身的代理入口；修改它需要重启浏览器，应安排重新人工登录。优先通过 `QOJ_RELAY_UPSTREAM` 调整出口，宿主机代理必须保持运行。
 
@@ -243,10 +244,10 @@ QOJ_LOGIN_HANDLE 可在应用处理器中限制采集身份；当前浏览器 Co
 新环境网络正常时可构建新镜像，再在独立一次性容器中检查，不替换当前登录浏览器：
 
 ```powershell
-docker compose -f compose.yaml -f compose.qoj-browser.yaml build worker
+docker compose -f compose.yaml -f compose.build.yaml -f compose.qoj-browser.yaml -f compose.qoj-browser.build.yaml build worker
 docker run --rm --entrypoint sh acm-leaderboard:qoj-browser -c 'mkdir -p "$TMPDIR" && pnpm check'
 ```
 
 Dockerfile 的 build 阶段已执行 TypeScript 和 pnpm build。构建通过后，只有在接受当前会话丢失时才部署新容器，并重复人工登录与两页真实读取。文档改动只检查内容、路径、命令和 diff，不需要重建应用。
 
-真实验收记录已迁至[历史归档](archive/2026-10-02-QOJ验收.md)，不代表当前部署状态。真实会话失效后重登和密文 Cookie 恢复未完成验收；自动登录、2FA、业务事实表、周期同步及管理员页面内的远程桌面仍待实现。
+真实验收记录已迁至[历史归档](archive/2026-10-02-QOJ验收.md)，不代表当前部署状态。个人业务事实、持续增量、管理页内嵌远程桌面已实现，见[项目实现状态](项目实现状态.md)。真实会话失效后重登和密文 Cookie 恢复未完成验收；自动登录及 2FA 仍待实现。

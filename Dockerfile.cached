@@ -1,27 +1,34 @@
 # Local recovery build: use already-installed dependencies only with an identical lockfile.
 # Clean installations continue to use Dockerfile.
 ARG BROWSER_CACHE_IMAGE=acm-leaderboard:cache-browser
-FROM ${BROWSER_CACHE_IMAGE} AS build
+FROM ${BROWSER_CACHE_IMAGE} AS dependencies
 USER root
 WORKDIR /app
-RUN cp pnpm-lock.yaml /tmp/cached-pnpm-lock.yaml
+RUN cp pnpm-lock.yaml /tmp/cached-pnpm-lock.yaml && \
+    rm -rf apps/web/src apps/web/.next apps/web/public apps/worker/src \
+      packages/core/src packages/connectors/src packages/db/src packages/db/drizzle scripts docs
+
+FROM dependencies AS build
 COPY . .
 RUN cmp pnpm-lock.yaml /tmp/cached-pnpm-lock.yaml && pnpm typecheck && pnpm build
 # Dependencies already exist in both cache images with this exact lockfile.
 # Copy only application files into a fresh layer instead of duplicating the
 # dependency tree and Next build cache on every local verification build.
-RUN mkdir /tmp/application && tar --exclude='./node_modules' --exclude='*/node_modules' --exclude='./apps/web/.next/cache' -cf - . | tar -xf - -C /tmp/application
+RUN mkdir /tmp/application && tar --exclude='./node_modules' \
+      --exclude='./apps/web/node_modules' --exclude='./apps/worker/node_modules' \
+      --exclude='./packages/core/node_modules' --exclude='./packages/db/node_modules' --exclude='./packages/connectors/node_modules' \
+      --exclude='./apps/web/.next/cache' -cf - . | tar -xf - -C /tmp/application
 
 # Reuse the same verified dependency tree in both targets. The older app cache
 # may have a different workspace install state even with matching versions.
-FROM ${BROWSER_CACHE_IMAGE} AS runtime
+FROM dependencies AS runtime
 USER root
 COPY --from=build --chown=node:node /tmp/application /app
 USER node
 ENTRYPOINT []
 CMD ["pnpm", "--filter", "@acm/web", "start"]
 
-FROM ${BROWSER_CACHE_IMAGE} AS worker-browser
+FROM dependencies AS worker-browser
 USER root
 COPY --from=build --chown=node:node /tmp/application /app
 USER node

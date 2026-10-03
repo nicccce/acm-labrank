@@ -89,9 +89,14 @@ export async function leaveTeamRecord(id: string, actorId: string, version: numb
 export async function getTeamRecord(id: string): Promise<TeamRow | null> {
   return (await getPool().query<TeamRow>(`SELECT ${columns} FROM teams WHERE id=$1`, [id])).rows[0] ?? null;
 }
-export async function getTeamMembers(id: string) {
-  return (await getPool().query<TeamMemberRow>(`SELECT u.id,u.username,u.real_name AS "realName",u.active,a.handle AS "verifiedCfHandle" FROM team_memberships m JOIN users u ON u.id=m.user_id LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE m.team_id=$1 AND m.left_at IS NULL ORDER BY u.id`, [id])).rows;
+export async function getTeamMembersBatch(ids: string[]) {
+  if (!ids.length) return new Map<string, TeamMemberRow[]>();
+  const rows = (await getPool().query<TeamMemberRow & { teamId: string }>(`SELECT m.team_id AS "teamId",u.id,u.username,u.real_name AS "realName",u.active,a.handle AS "verifiedCfHandle" FROM team_memberships m JOIN users u ON u.id=m.user_id LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE m.team_id=ANY($1::uuid[]) AND m.left_at IS NULL ORDER BY m.team_id,u.id`, [ids])).rows;
+  const result = new Map(ids.map(id => [id, [] as TeamMemberRow[]]));
+  for (const { teamId, ...member } of rows) result.get(teamId)!.push(member);
+  return result;
 }
+export async function getTeamMembers(id: string) { return (await getTeamMembersBatch([id])).get(id)!; }
 export async function listTeamRecords(userId: string | null, archived: boolean, limit: number, offset: number) {
   const where = `(archived_at IS NOT NULL)=$1 AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM team_memberships m WHERE m.team_id=teams.id AND m.user_id=$2 AND (m.left_at IS NULL OR teams.archived_at IS NOT NULL)))`;
   const rows = (await getPool().query<TeamRow>(`SELECT ${columns} FROM teams WHERE ${where} ORDER BY created_at DESC,id LIMIT $3 OFFSET $4`, [archived, userId, limit, offset])).rows;

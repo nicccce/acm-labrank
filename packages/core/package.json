@@ -11,7 +11,8 @@
     "./server": {
       "browser": "./src/browser.ts",
       "default": "./src/application/index.ts"
-    }
+    },
+    "./contracts": "./src/contracts/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

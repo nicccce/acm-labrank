@@ -1,5 +1,5 @@
-import { closeDb, createBoss, dispatchDueCollection, PROBE_QUEUE, writeWorkerHeartbeat, getPool, checkDatabaseReady, cleanCollectionHistory, getCollectionControl, expireLoginAttempts, maintainPersonalRuns, PLATFORM_READ_QUEUES, PERSONAL_QUEUES } from '@acm/db/server';
-import { createQojReadWorker, getConfig, maintainReadQueue } from '@acm/core/server';
+import { closeDb, createBoss, PROBE_QUEUE, writeWorkerHeartbeat, cleanRuntimeHistory, checkDatabaseReady, cleanCollectionHistory, getCollectionControl, expireLoginAttempts, PLATFORM_READ_QUEUES, PERSONAL_QUEUES } from '@acm/db/server';
+import { createQojReadWorker, getConfig, maintainCollectionJobs } from '@acm/core/server';
 import { qojHumanInput } from '../cli/qoj-human';
 import { registerPlatformQueues, registerPersonalQueues, registerSessionQueue } from './queues';
 
@@ -28,8 +28,7 @@ async function maintainCollection() {
     collectionRegistered = false;
   }
   await expireLoginAttempts();
-  if (enabled) { await maintainReadQueue(boss); await maintainPersonalRuns(boss); }
-  if (enabled && Date.now() - lastDispatchAt >= 60000) { await dispatchDueCollection(boss); lastDispatchAt = Date.now(); }
+  if (enabled) { const dispatch = Date.now() - lastDispatchAt >= 60000; await maintainCollectionJobs(boss, dispatch); if (dispatch) lastDispatchAt = Date.now(); }
 }
 async function shutdown(code = 0) {
   if (stopping) return;
@@ -65,9 +64,7 @@ try {
         .catch(() => console.error(JSON.stringify({ code: 'READ_MAINTENANCE_FAILED' }))).finally(() => { maintenanceRunning = false; });
     }
   }, 15000);
-  await getPool().query("DELETE FROM auth_rate_limits WHERE reset_at < now() - interval '1 day'");
-  await getPool().query("DELETE FROM sessions WHERE expires_at < now() - interval '30 days'");
-  await getPool().query("DELETE FROM runtime_heartbeats WHERE updated_at < now() - interval '1 day'");
+  await cleanRuntimeHistory();
   console.log(JSON.stringify({ event: 'worker_ready', synchronizationImplemented: true }));
 } catch {
   console.error(JSON.stringify({ code: 'WORKER_START_FAILED' }));

@@ -194,12 +194,14 @@ export const submissionAttributions = pgTable('submission_attributions', {
 export const syncCursors = pgTable('sync_cursors', {
   id: uuid('id').defaultRandom().primaryKey(), accountId: uuid('account_id').notNull().references(() => platformAccounts.id),
   mode: text('mode').notNull(), cursor: jsonb('cursor'), checkpoint: jsonb('checkpoint'), version: integer('version').default(1).notNull(),
+  initializedAt: timestamp('initialized_at', { withTimezone: true }),
   historyComplete: boolean('history_complete').default(false).notNull(), coverage: text('coverage').default('unknown').notNull(),
   lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
 }, t => [uniqueIndex('sync_cursor_account_mode').on(t.accountId, t.mode), check('sync_cursor_mode', sql`${t.mode} IN ('backfill','incremental')`)]);
 export const syncRuns = pgTable('sync_runs', {
   id: uuid('id').defaultRandom().primaryKey(), bindingId: uuid('binding_id').notNull().references(() => platformBindings.id),
   bindingVersion: integer('binding_version').notNull(), accountId: uuid('account_id').references(() => platformAccounts.id),
+  scope: text('scope').default('range').notNull(), initialFrom: timestamp('initial_from', { withTimezone: true }),
   kind: text('kind').notNull(), mode: text('mode').default('backfill').notNull(), status: text('status').default('queued').notNull(),
   batch: integer('batch').default(0).notNull(), jobId: uuid('job_id'), queue: text('queue').notNull(),
   pages: integer('pages').default(0).notNull(), records: integer('records').default(0).notNull(), retries: integer('retries').default(0).notNull(),
@@ -210,4 +212,4 @@ export const syncRuns = pgTable('sync_runs', {
   scanCursor: jsonb('scan_cursor'), scanCheckpoint: jsonb('scan_checkpoint'), cursorVersion: integer('cursor_version').default(1).notNull(),
   stopReason: text('stop_reason').default('more').notNull(), rangeComplete: boolean('range_complete').default(false).notNull(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
-}, t => [uniqueIndex('active_sync_target_kind').on(t.bindingId, t.kind, t.mode).where(sql`${t.status} IN ('queued','running')`), check('sync_run_range', sql`(${t.rangeFrom} IS NULL AND ${t.rangeTo} IS NULL) OR (${t.rangeFrom} IS NOT NULL AND ${t.rangeTo} IS NOT NULL AND ${t.rangeFrom}<${t.rangeTo} AND ${t.rangeTo}-${t.rangeFrom}<=interval '366 days')`), check('sync_run_kind', sql`${t.kind} IN ('verify','sync')`), check('sync_run_status', sql`${t.status} IN ('queued','running','completed','paused','failed','cancelled')`)]);
+}, t => [uniqueIndex('active_sync_target_kind').on(t.bindingId, t.kind, t.mode).where(sql`${t.status} IN ('queued','running')`), check('sync_run_scope', sql`${t.scope} IN ('initial','incremental','range')`), check('sync_initial_from', sql`(${t.scope}='initial')=(${t.initialFrom} IS NOT NULL)`), check('sync_run_range', sql`(${t.rangeFrom} IS NULL AND ${t.rangeTo} IS NULL) OR (${t.rangeFrom} IS NOT NULL AND ${t.rangeTo} IS NOT NULL AND ${t.rangeFrom}<${t.rangeTo} AND ${t.rangeTo}-${t.rangeFrom}<=interval '366 days')`), check('sync_run_kind', sql`${t.kind} IN ('verify','sync')`), check('sync_run_status', sql`${t.status} IN ('queued','running','completed','paused','failed','cancelled')`)]);

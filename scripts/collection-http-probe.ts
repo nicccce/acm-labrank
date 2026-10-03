@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { Route } from '../packages/core/node_modules/playwright-core';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
@@ -64,9 +65,23 @@ try {
   await page.getByRole('heading', { name: '采集与积分更新', exact: true }).waitFor();
   assert.equal(await page.getByLabel('Codeforces', { exact: true }).isChecked(), true);
   assert.equal(await page.getByLabel('QOJ', { exact: true }).isChecked(), false);
+  let releaseOld: (() => void) | undefined, held = false, delayed = false;
+  const oldResponse = new Promise<void>(resolve => { releaseOld = resolve; });
+  await page.route('**/api/admin/collection-settings', async (route: Route) => {
+    if (route.request().method() === 'GET' && !delayed) { delayed = true; const old = await route.fetch(); held = true; await oldResponse; await route.fulfill({ response: old }).catch(() => undefined); }
+    else await route.continue();
+  });
   await page.locator('#score-range').selectOption('7');
+  await page.getByLabel('Codeforces最小请求间隔').fill('2300');
+  await page.waitForTimeout(6200);
+  assert.ok(held, 'A delayed poll must overlap the following save');
+  assert.equal(await page.locator('#score-range').inputValue(), '7');
+  assert.equal(await page.getByLabel('Codeforces最小请求间隔').inputValue(), '2300');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await page.getByRole('status').getByText(/设置已保存/).waitFor();
+  releaseOld!(); await page.waitForTimeout(500);
+  assert.deepEqual(await page.locator('main [role=alert]').allTextContents(), [], 'Cancelled stale polls must not show an error');
+  await page.unroute('**/api/admin/collection-settings');
   await page.locator('#score-range').selectOption('fixed');
   await page.getByLabel('开始日期', { exact: true }).fill('2026-10-02'); await page.getByLabel('结束日期', { exact: true }).fill('2026-10-02');
   await page.getByRole('button', { name: '保存设置', exact: true }).click(); await page.getByRole('status').getByText(/设置已保存/).waitFor();
@@ -74,7 +89,12 @@ try {
   await page.getByLabel('Codeforces最小请求间隔').fill('2200'); await page.getByLabel('Codeforces最大请求间隔').fill('3200');
   await cf.getByRole('button', { name: '保存请求间隔', exact: true }).click(); await page.getByRole('status').getByText('Codeforces请求间隔已保存。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '启用采集', exact: true }).click(); await page.getByRole('button', { name: '暂停采集', exact: true }).waitFor();
-  await page.getByRole('button', { name: '立即更新积分', exact: true }).click(); await page.getByRole('status').getByText(/合并 .* 个已有任务/).waitFor();
+  await page.getByRole('button', { name: '采集新增提交并更新积分', exact: true }).click(); await page.getByRole('status').getByText(/合并 .* 个已有任务/).waitFor();
+  await page.getByLabel('补采开始日期', { exact: true }).fill('2026-09-01'); await page.getByLabel('补采结束日期', { exact: true }).fill('2026-09-02');
+  const supplementalRequest = page.waitForRequest((r: { url(): string; method(): string }) => r.url().endsWith('/api/admin/sync') && r.method() === 'POST');
+  await page.getByRole('button', { name: '补采所选历史区间', exact: true }).click();
+  assert.deepEqual((await supplementalRequest).postDataJSON(), { mode: 'backfill', from: '2026-09-01', to: '2026-09-02' });
+  await page.getByRole('status').getByText(/已有其他日期范围的同步任务/).waitFor();
   await mkdir('/tmp/collection-probe', { recursive: true }); await page.screenshot({ path: '/tmp/collection-probe/desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'Mobile page must not overflow horizontally');
@@ -88,7 +108,7 @@ try {
   await page.getByRole('status').getByText(/已清空并开始重爬/).waitFor();
   const replay = await api('/api/admin/collection-reset', admin, 'POST', input); assert.equal(replay.status, 202); assert.deepEqual(await replay.json(), await rebuilt.json());
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ event: 'collection_ui_probe_passed', checks: ['login and navigation', 'rolling/fixed settings', 'rate-limit save', 'manual sync', 'desktop and mobile layout', 'reset confirmation and idempotent replay', 'no browser exceptions'], screenshots: '/tmp/collection-probe' }));
+  console.log(JSON.stringify({ event: 'collection_ui_probe_passed', checks: ['cancelled old poll cannot overwrite saved state', 'history form sends explicit dates and displays concurrency conflict', 'polling preserves unsaved date/rate forms', 'login and navigation', 'rolling/fixed settings', 'rate-limit save', 'manual sync', 'desktop and mobile layout', 'reset confirmation and idempotent replay', 'no browser exceptions'], screenshots: '/tmp/collection-probe' }));
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

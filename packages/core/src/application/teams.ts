@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { archiveTeamRecord, createTeamRecord, getCollectionSettings, getTeamMembers, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
+import { archiveTeamRecord, createTeamRecord, getCollectionSettings, getTeamMembers, getTeamMembersBatch, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
 import { displayName } from '../domain';
 import { AppError } from './errors';
-import { parsePersonalQuery, queryMeta } from './personal';
+import { parsePersonalQuery, queryMeta } from './scores/query';
 
 const id = z.uuid().transform(v => v.toLowerCase());
 export const createTeamSchema = z.object({ name: z.string().trim().min(1).max(64), memberIds: z.array(id).min(2).max(3) }).strict();
@@ -54,7 +54,8 @@ export async function getTeamDetail(teamId: string, params: URLSearchParams) {
 export async function getTeamLeaderboard(params: URLSearchParams) {
   const parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
   const rows = await queryTeamLeaderboard(parsed.query);
-  const rosters = await Promise.all(rows.map(r => getTeamMembers(r.id)));
+  const grouped = await getTeamMembersBatch(rows.map(r => r.id));
+  const rosters = rows.map(r => grouped.get(r.id)!);
   const allCoverage = await queryCoverage(parsed.query.platforms, [...new Set(rosters.flatMap(members => members.map(m => m.id)))]);
   const items = rows.map((r, i) => {
     const members = rosters[i]!, coverage = allCoverage.filter(c => members.some(m => m.id === c.userId));
@@ -66,7 +67,8 @@ export async function getTeams(params: URLSearchParams, viewerId: string) {
   const parsed = z.object({ mine: z.enum(['1', '0']).default('0'), status: z.enum(['active', 'archived']).default('active'), page: z.coerce.number().int().min(1).max(100000).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict().safeParse(Object.fromEntries(params));
   if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍列表参数不合法', 400);
   const { page, limit } = parsed.data, result = await listTeamRecords(parsed.data.mine === '1' ? viewerId : null, parsed.data.status === 'archived', limit, (page - 1) * limit);
-  return { page, limit, total: result.total, items: await Promise.all(result.rows.map(r => getTeamProfile(r.id))) };
+  const grouped = await getTeamMembersBatch(result.rows.map(r => r.id));
+  return { page, limit, total: result.total, items: result.rows.map(team => ({ ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: grouped.get(team.id)!.map(m => ({ id: m.id, username: m.username, displayName: displayName(m), active: m.active })) })) };
 }
 export async function getMembers(params: URLSearchParams) {
   const parsed = z.object({ q: z.string().trim().max(64).default(''), page: z.coerce.number().int().min(1).max(100000).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict().safeParse(Object.fromEntries(params));

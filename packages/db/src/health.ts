@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getPool } from './client';
 
 // Increment when adding a business migration. Older/newer schemas require an explicit deployment.
-export const EXPECTED_MIGRATIONS = 8;
+export const EXPECTED_MIGRATIONS = 9;
 // pg-boss 12.35.1 uses schema 43; update together with the locked library.
 export const EXPECTED_QUEUE_SCHEMA = 43;
 
@@ -43,4 +43,10 @@ export async function checkWorkerReady() {
   const result = await getPool().query(`SELECT 1 FROM runtime_heartbeats
     WHERE instance_id = $1 AND service = 'worker' AND updated_at > now() - interval '45 seconds'`, [hostname()]);
   return result.rowCount === 1;
+}
+
+export async function cleanRuntimeHistory() {
+  await getPool().query("DELETE FROM auth_rate_limits WHERE reset_at < now() - interval '1 day'");
+  await getPool().query("DELETE FROM sessions WHERE expires_at < now() - interval '30 days'");
+  await getPool().query("DELETE FROM runtime_heartbeats WHERE updated_at < now() - interval '1 day'");
 }

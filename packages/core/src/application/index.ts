@@ -18,3 +18,4 @@ export * from './personal';
 export * from './collection/settings';
 export * from './teams';
 export type { PlatformId, PlatformReadRequest, PlatformReadOutcome } from '@acm/connectors/contracts';
+export * from './collection/maintenance';

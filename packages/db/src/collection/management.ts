@@ -2,14 +2,9 @@ import type { PoolClient } from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { getPool } from '../client';
 import { enqueuePersonalInTransaction, type BindingRow } from '../personal';
-import { collectionAvailability, collectionTransaction, configuredSyncRange, getCollectionSettings, type CollectionSettings, type ScoreRange, type SyncSource } from './settings';
+import { collectionAvailability, collectionTransaction, configuredSyncRange, getCollectionSettings, type CollectionSettings, type SyncSource } from './settings';
 
 export interface DispatchItem { bindingId: string; accountId: string | null; platform: string; runId?: string; jobId?: string | null; merged?: boolean; skipped?: string }
-function sameScoreRange(a: ScoreRange, b: ScoreRange) {
-  if (a.kind === 'rolling' && b.kind === 'rolling') return a.days === b.days;
-  if (a.kind === 'fixed' && b.kind === 'fixed') return a.from === b.from && a.to === b.to;
-  return false;
-}
 async function dispatchBindings(client: PoolClient, boss: PgBoss, bindings: BindingRow[], source: SyncSource, actorId?: string): Promise<DispatchItem[]> {
   const items: DispatchItem[] = [];
   for (const binding of bindings) {
@@ -18,8 +13,7 @@ async function dispatchBindings(client: PoolClient, boss: PgBoss, bindings: Bind
     if (state.reason) { items.push({ ...item, skipped: state.reason }); continue; }
     const kind = binding.candidate && binding.candidate_state === 'pending' ? 'verify' : 'sync';
     if (kind === 'sync' && !binding.account_id) { items.push({ ...item, skipped: 'NO_ACTIVE_BINDING' }); continue; }
-    // A rolling range can change while an older task is active. Finish that task
-    // first, then service the pending request, instead of flooding range conflicts.
+    // Finish the saved scan before servicing another request for this binding.
     const active = await client.query<{ id: string; job_id: string | null }>("SELECT id,job_id FROM sync_runs WHERE binding_id=$1 AND status IN ('queued','running') LIMIT 1", [binding.id]);
     if (active.rows[0]) { items.push({ ...item, runId: active.rows[0].id, jobId: active.rows[0].job_id, merged: true }); continue; }
     items.push({ ...item, ...await enqueuePersonalInTransaction(client, boss, binding, kind, 'incremental', undefined, source, actorId) });
@@ -36,23 +30,22 @@ async function invalidatePlatforms(client: PoolClient, boss: PgBoss, platforms: 
     if (ids.length) await boss.cancel(queue, ids, { db: { executeSql: (sql, values) => client.query(sql, values) } });
   }
   // A cancelled bounded scan cannot lend its checkpoint to a new generation.
-  await client.query("UPDATE sync_cursors SET cursor=NULL,checkpoint=NULL,version=version+1 WHERE account_id IN (SELECT id FROM platform_accounts WHERE platform=ANY($1))", [platforms]);
+  await client.query("UPDATE sync_cursors SET cursor=NULL,version=version+1 WHERE account_id IN (SELECT id FROM platform_accounts WHERE platform=ANY($1))", [platforms]);
   await client.query('UPDATE platform_bindings SET sync_requested=true,sync_blocked=NULL,next_sync_at=now() WHERE platform=ANY($1)', [platforms]);
 }
 export async function saveCollectionSettings(input: Omit<CollectionSettings, 'updatedAt'>, actorId: string, boss: PgBoss) {
   return collectionTransaction(async client => {
     const old = await getCollectionSettings(client);
     if (old.version !== input.version) throw new Error('VERSION_CONFLICT');
-    // PostgreSQL jsonb reorders object keys; compare dates, not serialization.
-    const rangeChanged = !sameScoreRange(old.scoreRange, input.scoreRange);
-    const affected = ['codeforces', 'luogu', 'qoj'].filter(p => old.platforms.includes(p) !== input.platforms.includes(p) || (rangeChanged && (old.platforms.includes(p) || input.platforms.includes(p))));
+    const affected = ['codeforces', 'luogu', 'qoj'].filter(p => old.platforms.includes(p) !== input.platforms.includes(p));
     await client.query('UPDATE collection_settings SET platforms=$1,auto_sync_enabled=$2,sync_interval_minutes=$3,score_range=$4,version=version+1,updated_at=now(),updated_by=$5 WHERE id=1', [input.platforms, input.autoSyncEnabled, input.syncIntervalMinutes, JSON.stringify(input.scoreRange), actorId]);
     await invalidatePlatforms(client, boss, affected);
     if (old.syncIntervalMinutes !== input.syncIntervalMinutes) await client.query(`UPDATE platform_bindings b SET next_sync_at=coalesce((SELECT max(finished_at) FROM sync_runs WHERE binding_id=b.id AND kind='sync' AND status='completed'),now())+$1*interval '1 minute'
       WHERE sync_blocked IS NULL AND NOT sync_requested AND NOT EXISTS(SELECT 1 FROM sync_runs r WHERE r.binding_id=b.id AND r.status IN ('queued','running'))`, [input.syncIntervalMinutes]);
     if (!old.autoSyncEnabled && input.autoSyncEnabled) await client.query('UPDATE platform_bindings SET next_sync_at=now() WHERE account_id IS NOT NULL AND sync_blocked IS NULL');
     const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=ANY($1) AND (b.sync_requested OR ($2 AND b.next_sync_at<=now() AND b.sync_blocked IS NULL)) ORDER BY b.id FOR UPDATE OF b`, [input.platforms, input.autoSyncEnabled])).rows;
-    const items = await dispatchBindings(client, boss, bindings, 'settings', actorId);
+    const schedulingChanged = affected.length > 0 || old.autoSyncEnabled !== input.autoSyncEnabled || old.syncIntervalMinutes !== input.syncIntervalMinutes;
+    const items = schedulingChanged ? await dispatchBindings(client, boss, bindings, 'settings', actorId) : [];
     await client.query("INSERT INTO collection_audit_logs(actor_id,action,target,details) VALUES ($1,'collection_settings_updated','collection',$2)", [actorId, JSON.stringify({ ...input, version: old.version + 1 })]);
     return { settings: await getCollectionSettings(client), items };
   }, true);

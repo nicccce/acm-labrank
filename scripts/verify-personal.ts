@@ -12,6 +12,7 @@ try {
   const migrate = spawnSync('pnpm', ['db:migrate'], { env: process.env, encoding: 'utf8' });
   if (migrate.status !== 0) throw new Error('Isolated database migration failed');
   await import('./personal-probe');
+  await import('./continuous-sync-probe');
   await import('./collection-management-probe');
   if (process.argv.includes('--http')) await import('./collection-http-probe');
   await import('./member-probe');

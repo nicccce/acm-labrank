@@ -129,15 +129,15 @@ async function fetchPage(account: AccountRef, scan: SubmissionScan, ctx: Request
   const base = { submissions, problems, coverage: 'visible' as const, sourceUrl: url.href, observedAt };
   // An offset that no longer contains the prior boundary cannot be trusted, including an empty page.
   if (state.anchor && !raw.some((row) => String(row.id) === state.anchor)) {
-    return filterSubmissionRange(validated(pageSchema, { ...base, nextCursor: { version: 1, data: { ...state, from: 1, anchor: null, seekAnchor: state.anchor, olderPages: 0 } }, stopReason: 'more', nextCheckpoint: null }), scan.range);
+    return filterSubmissionRange(validated(pageSchema, { ...base, nextCursor: { version: 1, data: { ...state, from: 1, anchor: null, seekAnchor: state.anchor, olderPages: 0 } }, stopReason: 'more', nextCheckpoint: null }), scan.range, scan.since);
   }
   const locating = state.seekAnchor !== null && !raw.some((row) => String(row.id) === state.seekAnchor);
   const older = scan.mode === 'incremental' && checkpoint?.highWaterId && raw.length > 0 && raw.every((row) =>
     BigInt(row.id) <= BigInt(checkpoint.highWaterId!) && row.creationTimeSeconds * 1000 < Date.parse(checkpoint.startedAt) - LOOKBACK_MS);
   const olderPages = !locating && older ? state.olderPages + 1 : 0;
-  const rangeReached = !locating && rangeStartReached(submissions, scan.range);
+  const rangeReached = !locating && rangeStartReached(submissions, scan.range, scan.since);
   const finished = raw.length === 0 || olderPages >= 2 || rangeReached;
-  const nextCheckpoint: ConnectorCheckpoint | null = finished && (scan.mode === 'incremental' || scan.range) ? {
+  const nextCheckpoint: ConnectorCheckpoint | null = finished && (scan.mode === 'incremental' || scan.range || scan.since) ? {
     version: 1, data: { handle, scope, parserVersion: PARSER_VERSION, highWaterId: state.headId, startedAt: state.startedAt },
   } : null;
   const overlap = Math.max(1, Math.floor(state.pageSize * 0.2));
@@ -148,7 +148,7 @@ async function fetchPage(account: AccountRef, scan: SubmissionScan, ctx: Request
       anchor: locating || raw.length < state.pageSize ? null : String(raw.at(-1)!.id),
       seekAnchor: locating ? state.seekAnchor : null, olderPages,
     } },
-  }), scan.range);
+  }), scan.range, scan.since);
 }
 
 function normalizeContest(raw: z.infer<typeof contestSchema>, observedAt: string) {

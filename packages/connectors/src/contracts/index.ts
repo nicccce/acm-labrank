@@ -69,22 +69,29 @@ export interface SubmissionScan {
   checkpoint: ConnectorCheckpoint | null;
   pageSize?: number;
   range?: SubmissionRange;
+  /** Initial scan lower bound, without a fixed upper bound. Mutually exclusive with range. */
+  since?: string;
 }
 /** UTC half-open interval; callers convert inclusive Beijing dates before scanning. */
 export interface SubmissionRange { from: string; to: string }
-export function rangeStartReached(submissions: NormalizedSubmission[], range?: SubmissionRange): boolean {
-  if (!range) return false;
+export function rangeStartReached(submissions: NormalizedSubmission[], range?: SubmissionRange, since?: string): boolean {
+  if (range && since) throw new ConnectorError('INVALID_INPUT', 'range and since are mutually exclusive');
+  const from = range?.from ?? since;
+  if (!from) return false;
+  if (!Number.isFinite(Date.parse(from))) throw new ConnectorError('INVALID_INPUT', 'Invalid scan lower bound');
   let previous = Infinity;
   for (const row of submissions) {
     const time = row.submittedAt === null ? NaN : Date.parse(row.submittedAt);
     if (!Number.isFinite(time) || time > previous) throw new ConnectorError('PARSE_CHANGED', 'Cannot safely truncate an unordered or undated submission page');
     previous = time;
   }
-  return submissions.some(row => Date.parse(row.submittedAt!) < Date.parse(range.from));
+  return submissions.some(row => Date.parse(row.submittedAt!) < Date.parse(from));
 }
-export function filterSubmissionRange(page: SubmissionPage, range?: SubmissionRange): SubmissionPage {
-  if (!range) return page;
-  const submissions = page.submissions.filter(row => row.submittedAt !== null && Date.parse(row.submittedAt) >= Date.parse(range.from) && Date.parse(row.submittedAt) < Date.parse(range.to));
+export function filterSubmissionRange(page: SubmissionPage, range?: SubmissionRange, since?: string): SubmissionPage {
+  if (range && since) throw new ConnectorError('INVALID_INPUT', 'range and since are mutually exclusive');
+  const from = range?.from ?? since;
+  if (!from) return page;
+  const submissions = page.submissions.filter(row => row.submittedAt !== null && Date.parse(row.submittedAt) >= Date.parse(from) && (!range || Date.parse(row.submittedAt) < Date.parse(range.to)));
   const keys = new Set(submissions.map(row => row.problemKey));
   return { ...page, submissions, problems: page.problems.filter(problem => keys.has(problem.problemKey)) };
 }

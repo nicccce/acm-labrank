@@ -1,6 +1,7 @@
 'use client';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { apiRequest, ApiRequestError, requestMessage } from './api-request';
 
 type Connection = { state: string; collector: string | null };
 type Attempt = { id: string; version: number; expiresAt?: string };
@@ -10,57 +11,52 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
   const [username, setUsername] = useState(''), [password, setPassword] = useState(''), [captcha, setCaptcha] = useState('');
   const [attempt, setAttempt] = useState<Attempt | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const [luoguBusy, setLuoguBusy] = useState(false), [luoguMessage, setLuoguMessage] = useState('');
-  async function call(url: string, method = 'GET', body?: unknown) {
-    try {
-      const response = await fetch(url, { method, credentials: 'same-origin', signal: AbortSignal.timeout(70000), headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: 'no-store' });
-      const data = await response.json(); if (!response.ok) throw new Error(data.message ?? '操作失败'); return data;
-    } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('请求等待超时，请重新获取验证码或刷新连接状态。', { cause: error });
-      throw error;
-    }
-  }
+  const requests = useRef<AbortController | null>(null);
+  useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
+  const call = <T = Record<string, never>>(url: string, method = 'GET', body?: unknown) => apiRequest<T>(url, csrfToken, method, body, requests.current?.signal);
   async function refreshConnections() {
-    const data = await call('/api/admin/platforms');
+    const data = await call<{ items: { platform: string; connection: Connection }[] }>('/api/admin/platforms');
     setConnections(Object.fromEntries(data.items.map((item: { platform: string; connection: Connection }) => [item.platform, item.connection])));
   }
   async function action(fn: () => Promise<void>) {
     setBusy(true); setMessage('');
-    try { await fn(); } catch (error) { setMessage(error instanceof Error ? error.message : '操作未完成'); }
+    try { await fn(); } catch (error) { if (!requests.current?.signal.aborted) setMessage(requestMessage(error)); }
     finally { setBusy(false); }
   }
   async function luoguAction(fn: () => Promise<void>, progress: string) {
     setBusy(true); setLuoguBusy(true); setLuoguMessage(progress);
-    try { await fn(); } catch (error) { setLuoguMessage(error instanceof Error ? error.message : '洛谷登录未完成'); }
+    try { await fn(); } catch (error) { if (!requests.current?.signal.aborted) setLuoguMessage(requestMessage(error)); }
     finally { setBusy(false); setLuoguBusy(false); }
   }
   async function begin() {
     if (attempt) await call(`/api/admin/connections/luogu/login-attempts/${attempt.id}`, 'DELETE');
     setAttempt(null); setPassword(''); setCaptcha('');
-    setAttempt(await call('/api/admin/connections/luogu/login-attempts', 'POST', { username }));
+    setAttempt(await call<Attempt>('/api/admin/connections/luogu/login-attempts', 'POST', { username }));
     setLuoguMessage('验证码已获取，请填写密码和图形验证码。');
   }
   async function submit() {
     if (!attempt) return;
     try {
-      const result = await call(`/api/admin/connections/luogu/login-attempts/${attempt.id}/submit`, 'POST', { version: attempt.version, password, captcha });
+      const result = await call<{ identity: { name: string; uid: string } }>(`/api/admin/connections/luogu/login-attempts/${attempt.id}/submit`, 'POST', { version: attempt.version, password, captcha });
       setAttempt(null); await refreshConnections(); setLuoguMessage(`洛谷已登录：${result.identity.name}（UID ${result.identity.uid}）。提交列表尚未测试。`);
     } catch (error) { setAttempt(null); throw error; }
     finally { setPassword(''); setCaptcha(''); }
   }
   async function verifyQoj() {
-    const queued = await call('/api/admin/connections/qoj/verify-session', 'POST');
+    const queued = await call<{ runId: string }>('/api/admin/connections/qoj/verify-session', 'POST');
     setMessage('正在核验 QOJ 登录身份…');
     const deadline = Date.now() + 130000;
     while (Date.now() < deadline) {
-      const run = await call(`/api/admin/read-runs/${queued.runId}`);
+      requests.current?.signal.throwIfAborted();
+      const run = await call<{ status: string; error?: { message?: string }; result?: { collector?: string } }>(`/api/admin/read-runs/${queued.runId}`);
       if (!['queued', 'running'].includes(run.status)) {
         await refreshConnections();
-        if (run.status !== 'completed') throw new Error(run.error?.message ?? '身份核验未完成，请在远程桌面完成登录或挑战后重试');
+        if (run.status !== 'completed') throw new ApiRequestError(run.error?.message ?? '身份核验未完成，请在远程桌面完成登录或挑战后重试');
         setMessage(`QOJ 已核验：${run.result?.collector ?? '已登录'}。提交列表尚未测试。`); return;
       }
       await new Promise(resolve => setTimeout(resolve, 1500));
     }
-    throw new Error('核验等待超时，请刷新状态后重试');
+    throw new ApiRequestError('核验等待超时，请刷新状态后重试');
   }
   const button = 'rounded border border-slate-300 bg-white px-4 py-2 disabled:opacity-50';
   const field = 'w-full rounded border border-slate-300 px-3 py-2';
@@ -68,7 +64,7 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
     <section className="rounded border bg-white p-5">
       <h2 className="text-lg font-semibold">采集控制</h2>
       <p className="my-3">当前：{control.enabled ? '已启用' : '已暂停'}。CF 无需平台登录；QOJ、洛谷在启用并登录后参与采集，可前往采集管理页选择平台。</p>
-      <button className={button} disabled={busy} onClick={() => void action(async () => { const updated = await call('/api/admin/collection-control', 'PUT', { enabled: !control.enabled, version: control.version }); setControl(updated); setMessage(updated.enabled ? '采集已启用，worker 会接收已入队任务。' : '采集已暂停，身份核验仍可使用。'); })}>{control.enabled ? '暂停采集' : '启用采集'}</button>
+      <button className={button} disabled={busy} onClick={() => void action(async () => { const updated = await call<Control>('/api/admin/collection-control', 'PUT', { enabled: !control.enabled, version: control.version }); setControl(updated); setMessage(updated.enabled ? '采集已启用，worker 会接收已入队任务。' : '采集已暂停，身份核验仍可使用。'); })}>{control.enabled ? '暂停采集' : '启用采集'}</button>
     </section>
     <section className="rounded border bg-white p-5">
       <h2 className="text-lg font-semibold">洛谷登录</h2>
@@ -82,7 +78,7 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
           <label className="block">验证码<input className={field} value={captcha} onChange={e => setCaptcha(e.target.value)} autoComplete="off" disabled={busy} /></label>
           <div className="flex flex-wrap gap-2">
             <button className={button} disabled={busy || !password || !captcha} onClick={() => void luoguAction(submit, '正在提交洛谷登录并核验身份…')}>登录洛谷</button>
-            <button className={button} disabled={busy} onClick={() => void luoguAction(async () => { const result = await call(`/api/admin/connections/luogu/login-attempts/${attempt.id}/refresh-captcha`, 'POST', { version: attempt.version }); setAttempt({ ...attempt, version: result.version }); setCaptcha(''); setLuoguMessage('验证码已刷新，请输入新图片中的字符。'); }, '正在刷新图形验证码…')}>换一张</button>
+            <button className={button} disabled={busy} onClick={() => void luoguAction(async () => { const result = await call<Attempt>(`/api/admin/connections/luogu/login-attempts/${attempt.id}/refresh-captcha`, 'POST', { version: attempt.version }); setAttempt({ ...attempt, version: result.version }); setCaptcha(''); setLuoguMessage('验证码已刷新，请输入新图片中的字符。'); }, '正在刷新图形验证码…')}>换一张</button>
             <button className={button} disabled={busy} onClick={() => void luoguAction(async () => { try { await call(`/api/admin/connections/luogu/login-attempts/${attempt.id}`, 'DELETE'); setLuoguMessage('本次洛谷登录已取消。'); } finally { setAttempt(null); setPassword(''); setCaptcha(''); } }, '正在取消本次登录…')}>取消</button>
           </div>
         </>}

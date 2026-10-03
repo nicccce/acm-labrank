@@ -78,3 +78,26 @@ describe('account read orchestration', () => {
     expect(second.checkpoint).not.toBeNull();
   });
 });
+
+
+describe('continuous collection boundaries', () => {
+  it('resumes a timed-out first scan using the original lower boundary and publishes only at completion', async () => {
+    let clock = Date.now(); const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const since = new Date((1700000000 + 5) * 1000).toISOString();
+    try {
+      const first = await readAccount({ ...options, mode: 'incremental', since, maxPages: 10 }, context([10, 9, 8, 7, 6, 5, 4]), async () => { clock += 120001; });
+      expect(first).toMatchObject({ pages: 1, batchStatus: 'budget_exhausted', stopReason: 'more', checkpoint: null });
+      const resumed = await readAccount({ ...options, mode: 'incremental', since, maxPages: 10, cursor: first.cursor }, context([10, 9, 8, 7, 6, 5, 4]));
+      expect(resumed).toMatchObject({ batchStatus: 'complete', stopReason: 'range_start', checkpoint: { data: { highWaterId: '10' } } });
+      expect(resumed.submissions.map(row => row.externalSubmissionId)).toContain('5');
+      expect(resumed.submissions.map(row => row.externalSubmissionId)).not.toContain('4');
+    } finally { now.mockRestore(); }
+  });
+  it('a checkpoint from an empty account still discovers its first later submission', async () => {
+    const empty = await readAccount({ ...options, mode: 'incremental', since: '2026-09-01T00:00:00.000Z' }, context([]));
+    expect(empty.checkpoint).toMatchObject({ data: { highWaterId: null } });
+    const next = await readAccount({ ...options, mode: 'incremental', checkpoint: empty.checkpoint }, context([10]));
+    expect(next.submissions.map(row => row.externalSubmissionId)).toEqual(['10']);
+    expect(next.stopReason).toBe('history_end');
+  });
+});

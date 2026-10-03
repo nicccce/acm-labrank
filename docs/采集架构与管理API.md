@@ -1,6 +1,6 @@
 # 三平台采集架构与管理 API
 
-更新：2026-10-03。公共读取和限流初次交付于 `0002_empty_viper`，当前管理设置需迁移至 `0006_collection_management` 及匹配源码；页面、平台选择、日期配置、定时调度和局部重爬见[管理员采集管理](管理员采集管理.md)。正式读取同样受总采集及平台开关限制，登录和纯身份核验独立可用。
+更新：2026-10-03。公共读取和限流初次交付于 `0002_empty_viper`，当前管理设置需迁移至 `0008_continuous_incremental` 及匹配源码；页面、平台选择、日期配置、定时调度和局部重爬见[管理员采集管理](管理员采集管理.md)。正式读取同样受总采集及平台开关限制，登录和纯身份核验独立可用。
 
 ## 目录和依赖
 
@@ -8,6 +8,10 @@
 
 - `apps/worker/src/runtime`：启动、队列注册、心跳及鉴权恢复扫描。
 - `apps/worker/src/cli`：三平台命令及人工输入。旧文件和原命令保留为兼容入口。
+- `packages/core/src/application/members`：个人资料与账号绑定。
+- `packages/core/src/application/scores`：个人成绩、个人/团队共用日期、计分表达式和查询元信息。
+- `packages/core/src/contracts`：客户端可直接引用的纯 DTO 与状态定义，不依赖 Node、数据库或网络。
+- `packages/db/src/personal`：绑定、事实/归属写入、游标/运行编排；原 `personal.ts` 保留兼容导出。
 - `packages/core/src/application/collection`：统一契约、读取、请求控制、连接任务租约、运行记录、管理用例。
 - `packages/core/src/application/platforms`：CF 请求上下文、洛谷会话/登录、QOJ 浏览器/会话/人工处理。
 - `packages/connectors/src/contracts`：浏览器可使用的纯类型。平台解析器和样本仍在各平台目录。
@@ -33,7 +37,7 @@
 
 平台 ID 为 `codeforces / luogu / qoj`。个人账号输入统一为 `target`；解析后身份使用 `account`。洛谷、QOJ 默认连接为 `luogu-lab / qoj-lab`，可通过对应 `*_CONNECTION_ID` 配置；正式 QOJ 队列只能使用其配置的专用连接。
 
-默认两页、120 秒，预算上限 900 秒。洛谷最多 100 页，其他平台最多 1000 页。`signal`、回调、浏览器实例和测试注入属于运行参数，不进入数据库或队列请求。输入拒绝未知字段，禁止通过任务传递凭据或覆盖限流参数。
+默认两页、120 秒，预算上限 900 秒。洛谷最多 100 页，其他平台最多 1000 页。`signal`、回调、浏览器实例和测试注入属于运行参数，不进入数据库或队列请求。`since` 为首次采集的 ISO 日期下界，与 `range:{from,to}` 互斥；个人业务同步每批固定 3 页、120 秒，公共读取默认两页的契约不变。输入拒绝未知字段，禁止通过任务传递凭据或覆盖限流参数。
 
 统一结果包含：
 
@@ -48,7 +52,7 @@ error: null | { code, message, httpStatus, retryAt, action }
 
 固定字段无值时使用 `null`；时间使用 ISO 8601。`collector` 是真实核验后的采集账号标识：CF 为 null，洛谷为 UID，QOJ 为 handle。平台原生判题字段及身份证据保持既有语义。
 
-`status` 表示该次执行的业务结果：`completed / auth_required / human_input_required / restricted / parse_changed / timeout / cancelled / failed`。`batchStatus` 为 `complete / page_limit / budget_exhausted / cancelled`。`stopReason` 为 `more / history_end / checkpoint_reached`。
+`status` 表示该次执行的业务结果：`completed / auth_required / human_input_required / restricted / parse_changed / timeout / cancelled / failed`。`batchStatus` 为 `complete / page_limit / budget_exhausted / cancelled`。`stopReason` 为 `more / history_end / checkpoint_reached / range_start`。
 
 达到页数限制可以成功结束本批次，`historyComplete` 仍为 false；增量到达 checkpoint 也不等于完整历史回填。数据库运行记录保存摘要，完整返回数据通过调用结果或 pg-boss output 获取，不写正式提交事实表。
 
@@ -108,4 +112,4 @@ pnpm qoj:debug --target muhammad --enqueue
 
 `pnpm collection:probe` 只允许连接名为 `acm_architecture_verify` 的全新独立测试数据库，会创建测试用户、队列和调整测试配额；重复运行前重建该测试库，禁止将探针接到业务数据库。加 `--http` 时要求同一测试环境在 `http://localhost:3001` 运行匹配的新 Web。
 
-发布前先备份并停止旧 worker，执行迁移，再部署匹配的新 web/worker。不要只对旧运行镜像执行迁移，其 readiness 版本检查会失败。重启/重建 QOJ 浏览器可能丢失当前登录状态，应按 QOJ 维护文档准备人工重新鉴权。源码实施和独立测试不要求重启当前浏览器。
+发布前先备份并停止旧 worker，执行迁移，再部署匹配的新 web/worker。不要只对旧运行镜像执行迁移，其 readiness 版本检查会失败。保留当前 QOJ 浏览器时，暂停并等待活动任务结束，按个人后端文档原位更新 Node worker，不重建浏览器容器。源码实施和独立测试不要求重启当前浏览器。

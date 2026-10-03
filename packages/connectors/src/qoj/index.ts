@@ -44,13 +44,13 @@ export const qojConnector: ReadConnector = {
     for (const s of submissions) if (progress.headId === null || BigInt(s.externalSubmissionId) > BigInt(progress.headId)) progress.headId = s.externalSubmissionId;
     if (scan.mode === 'incremental' && anchor && current.submissions.some(s => BigInt(s.externalSubmissionId) <= BigInt(anchor))) progress.crossedPage ??= progress.page;
     const crossed = progress.crossedPage !== null && progress.page > progress.crossedPage && current.submissions.every(s => anchor !== null && BigInt(s.externalSubmissionId) <= BigInt(anchor));
-    const stopReason = rangeStartReached(submissions, scan.range) ? 'range_start' : current.terminal ? 'history_end' : crossed ? 'checkpoint_reached' : 'more';
+    const stopReason = rangeStartReached(submissions, scan.range, scan.since) ? 'range_start' : current.terminal ? 'history_end' : crossed ? 'checkpoint_reached' : 'more';
     const output: SubmissionPage = { submissions, problems, stopReason, coverage: 'visible', sourceUrl: url.href, observedAt,
       nextCursor: stopReason === 'more' ? { version: 1, data: { ...progress, page: progress.page + 1 } } : null,
       nextCheckpoint: stopReason === 'more' ? null : { version: 1, data: { account: account.handle, parser: PARSER_VERSION, headId: progress.headId } },
     };
     // Validate page framing as well as the individual records validated by the parser.
     z.object({ sourceUrl: z.url(), observedAt: z.iso.datetime(), coverage: z.enum(['visible', 'restricted']), stopReason: z.enum(['more', 'history_end', 'checkpoint_reached', 'range_start']) }).parse(output);
-    return filterSubmissionRange(output, scan.range);
+    return filterSubmissionRange(output, scan.range, scan.since);
   },
 };

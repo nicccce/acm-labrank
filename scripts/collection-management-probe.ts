@@ -29,7 +29,7 @@ try {
   const qojConnection = await ensureCollectionConnection('qoj-lab', 'qoj');
   await pool.query("INSERT INTO connector_sessions(id,platform,encrypted_session) VALUES ('qoj-lab','qoj','fixture-secret-preserve') ON CONFLICT(id) DO NOTHING");
   async function activeRun(b: BindingRow, mode: 'incremental' | 'backfill' = 'incremental') {
-    const requested = await requestPersonalSync(b.id, mode, boss, configuredSyncRange(await getCollectionSettings()));
+    const requested = await requestPersonalSync(b.id, mode, boss);
     const run = (await getSyncRun(requested.runId))!;
     if (run.status === 'queued') assert.equal(await claimSyncRun(run.id, run.batch, run.job_id!), true);
     await readSyncCursor(b.account_id!, run.mode);
@@ -63,7 +63,7 @@ try {
   assert.equal((await pool.query<{ next_sync_at: Date }>('SELECT next_sync_at FROM platform_bindings WHERE id=$1', [cf.id])).rows[0]!.next_sync_at.getTime(), shorterDue.getTime());
   assert.ok(!(await dispatchDueCollection(boss)).some(item => item.bindingId === cf.id));
   await pool.query('UPDATE platform_bindings SET next_sync_at=now()-interval \'1 minute\' WHERE id=$1', [cf.id]);
-  const [manual, scheduled] = await Promise.all([requestPersonalSync(cf.id, 'incremental', boss, configuredSyncRange(settings)), dispatchDueCollection(boss)]);
+  const [manual, scheduled] = await Promise.all([requestPersonalSync(cf.id, 'incremental', boss), dispatchDueCollection(boss)]);
   if (scheduled[0]?.runId) assert.equal(scheduled[0].runId, manual.runId);
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM sync_runs WHERE binding_id=$1 AND status IN ('queued','running')", [cf.id])).rows[0].n, 1);
   const interrupted = await activeRun(cf);
@@ -145,22 +145,26 @@ try {
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM submissions WHERE platform='codeforces'")).rows[0].n, 1);
   await assert.rejects(resetCollectionPlatforms({ ...request, platforms: ['qoj'] }, admin.id, boss), /RESET_REQUEST_CONFLICT/);
   const freshIncremental = await activeRun(cf);
-  assert.ok(freshIncremental.scan_checkpoint); assert.equal(freshIncremental.collection_generation, rebuild.collection_generation);
-  await finishPersonalBatch(freshIncremental.id, boss, { complete: true });
+  assert.equal(freshIncremental.scope, 'initial'); assert.equal(freshIncremental.scan_checkpoint, null); assert.equal(freshIncremental.collection_generation, rebuild.collection_generation);
+  await complete(cf);
   checks.push('atomic selected-platform reset, preserved identities/secrets, stale writes/checkpoints and idempotent replay');
 
+  const continuing = await activeRun(cf), checkpoint = await readSyncCursor(cf.account_id!, 'incremental');
   control = await getCollectionControl(); await setCollectionControl(false, control.version, admin.id);
   settings = (await saveCollectionSettings({ ...writable(settings), scoreRange: { kind: 'fixed', from: '2026-10-01', to: '2026-10-02' } }, admin.id, boss)).settings;
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM sync_runs WHERE binding_id=$1 AND status IN ('queued','running')", [cf.id])).rows[0].n, 0);
+  assert.equal((await getSyncRun(continuing.id))!.status, 'running');
+  assert.deepEqual((await readSyncCursor(cf.account_id!, 'incremental')).checkpoint, checkpoint.checkpoint);
+  assert.equal((await collectionAvailability('codeforces')).generation, continuing.collection_generation);
   await assert.rejects(resetCollectionPlatforms({ platforms: ['codeforces'], version: settings.version, requestId: randomUUID() }, admin.id, boss), /COLLECTION_PAUSED/);
   control = await getCollectionControl(); await changeAdminCollectionControl({ enabled: true, version: control.version }, admin.id);
-  const expanded = await activeRun(cf); assert.equal(expanded.scan_checkpoint, null); assert.equal(expanded.range_from!.toISOString(), '2026-09-30T16:00:00.000Z');
+  const expanded = await activeRun(cf); assert.equal(expanded.id, continuing.id); assert.equal(expanded.scope, 'incremental'); assert.equal(expanded.range_from, null);
   const paginated = await listPersonalSyncRuns({ limit: 1 }); assert.equal(paginated.length, 1); assert.ok(paginated[0].started_at);
-  // Old verification results must not publish a binding after settings changed.
+  // Disabling a platform still prevents an old verification from publishing.
   await pool.query("UPDATE sync_runs SET kind='verify' WHERE id=$1", [expanded.id]);
-  settings = (await saveCollectionSettings({ ...writable(settings), scoreRange: { kind: 'rolling', days: 30 }, autoSyncEnabled: false }, admin.id, boss)).settings;
+  settings = (await saveCollectionSettings({ ...writable(settings), platforms: [], scoreRange: { kind: 'rolling', days: 30 }, autoSyncEnabled: false }, admin.id, boss)).settings;
   await assert.rejects(activateBinding(expanded.id, { platform: 'codeforces', kind: 'person', handle: 'CollectionCF', externalId: null }, boss), /STALE_BINDING/);
+  settings = (await saveCollectionSettings({ ...writable(settings), platforms: ['codeforces'] }, admin.id, boss)).settings;
   control = await getCollectionControl(); await setCollectionControl(false, control.version, admin.id);
-  checks.push('paused settings deferred until resume, expanded range head scan, task metadata and stale verification rejection');
+  checks.push('query date changes preserve active runs/checkpoints while paused; resume keeps incremental scope; disabled platforms reject late verification');
   console.log(JSON.stringify({ event: 'collection_management_probe_passed', checks, livePlatformRequests: networkRequests }));
 } finally { globalThis.fetch = originalFetch; await boss.stop(); await closeDb(); }

@@ -43,7 +43,8 @@ try {
   await assert.rejects(commitPersonalPage(run.id, version - 1, fixturePage()), /STALE_CURSOR/);
   const invalid = fixturePage(); invalid.problems.push({ ...invalid.problems[0]!, platform: 'qoj', problemKey: 'bad' });
   await assert.rejects(commitPersonalPage(run.id, version, invalid), /FACT_PLATFORM_MISMATCH/);
-  assert.equal((await readSyncCursor(run.account_id!, 'backfill')).version, version);
+  assert.equal((await getSyncRun(run.id))!.cursor_version, version);
+  const unpublished = await readSyncCursor(run.account_id!, 'incremental'); assert.equal(unpublished.checkpoint, null); assert.equal(unpublished.initialized_at, null);
   checks.push('stale cursor and failed page transaction do not advance');
 
   const earlier = fixturePage('accepted', '2026-10-02T13:00:00.000Z');
@@ -131,7 +132,7 @@ try {
   const rangeVerify = (await getSyncRun(rangeCandidate.runId!))!;
   await claimSyncRun(rangeVerify.id, 0, rangeVerify.job_id!);
   const automatic = await activateBinding(rangeVerify.id, { platform: 'codeforces', kind: 'person', handle: 'RangeFixture', externalId: null }, boss);
-  assert.ok((await getSyncRun(automatic.runId))!.range_from);
+  assert.equal((await getSyncRun(automatic.runId))!.scope, 'initial'); assert.ok((await getSyncRun(automatic.runId))!.initial_from); assert.equal((await getSyncRun(automatic.runId))!.range_from, null);
   await pool.query("UPDATE sync_runs SET status='cancelled' WHERE id=$1", [automatic.runId]);
   const range = { from: new Date('2026-10-01T16:00:00.000Z'), to: new Date('2026-10-02T16:00:00.000Z') };
   const initial = await requestPersonalSync(rangeCandidate.bindingId, 'incremental', boss, range);
@@ -154,20 +155,20 @@ try {
   assert.equal(bounded.status, 'completed'); assert.equal(bounded.stop_reason, 'range_start'); assert.equal(bounded.range_complete, true);
   assert.equal(bounded.pages, 1); assert.equal(bounded.batch, 0); assert.equal(bounded.records, 2);
   assert.equal(readRequests.filter(path => path.endsWith('user.status')).length, 1);
-  const boundedCursor = await readSyncCursor(bounded.account_id!, 'incremental'); assert.equal(boundedCursor.history_complete, false);
+  const boundedCursor = await readSyncCursor(bounded.account_id!, 'incremental'); assert.equal(boundedCursor.history_complete, false); assert.equal(boundedCursor.checkpoint, null); assert.equal(boundedCursor.initialized_at, null);
   assert.equal((await getPersonalMember(rangeUser.id, query())).submissionCount, 2);
   assert.equal((await getPersonalMember(rangeUser.id, query())).provisional, true);
   const rawIds = (await getPersonalRecords(rangeUser.id, query(), true)).items.map(row => row.externalSubmissionId).sort();
   assert.deepEqual(rawIds, ['993', '994']);
-  checks.push('first incremental stops at requested dates, includes Beijing boundaries and never claims full history');
+  checks.push('explicit range stops at requested dates, includes Beijing boundaries and never claims full history');
 
   const reused = await requestPersonalSync(rangeCandidate.bindingId, 'incremental', boss, range);
-  assert.ok((await getSyncRun(reused.runId))!.scan_checkpoint);
+  assert.equal((await getSyncRun(reused.runId))!.scan_checkpoint, null);
   await pool.query("UPDATE sync_runs SET status='cancelled' WHERE id=$1", [reused.runId]);
   const wider = await requestPersonalSync(rangeCandidate.bindingId, 'incremental', boss, { ...range, from: new Date('2026-09-01T16:00:00.000Z') });
   assert.equal((await getSyncRun(wider.runId))!.scan_checkpoint, null);
   await pool.query("UPDATE sync_runs SET status='cancelled' WHERE id=$1", [wider.runId]);
-  checks.push('range merges are exact and extending earlier discards premature incremental checkpoints');
+  checks.push('range merges are exact and supplemental scans never reuse continuous checkpoints');
 
   const terminal = await requestPersonalSync(rangeCandidate.bindingId, 'backfill', boss, range);
   const terminalRun = (await getSyncRun(terminal.runId))!; await claimSyncRun(terminalRun.id, 0, terminalRun.job_id!);

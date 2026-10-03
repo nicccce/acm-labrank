@@ -8,6 +8,7 @@ export interface ReadAccountOptions {
   cursor?: ConnectorCursor | null;
   checkpoint?: ConnectorCheckpoint | null;
   pageSize?: number;
+  since?: string;
   range?: import('@acm/connectors/contracts').SubmissionRange;
   maxPages?: number;
   maxDurationMs?: number;
@@ -63,7 +64,7 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
     while (result.pages < maxPages) {
       if (Date.now() >= deadline) { result.batchStatus = 'budget_exhausted'; break; }
       signal.throwIfAborted();
-      const scan = { mode: options.mode, cursor: result.cursor, checkpoint: options.checkpoint ?? null, pageSize: options.pageSize, range: options.range };
+      const scan = { mode: options.mode, cursor: result.cursor, checkpoint: options.checkpoint ?? null, pageSize: options.pageSize, range: options.range, since: options.since };
       const page = options.contestId
         ? await (connector.fetchContestSubmissionPage ?? unsupported)(account, options.contestId, scan, batchCtx)
         : await connector.fetchSubmissionPage(account, scan, batchCtx);

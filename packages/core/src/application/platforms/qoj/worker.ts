@@ -15,9 +15,10 @@ export const qojReadJobSchema = z.object({
   maxPages: z.number().int().min(1).max(1000).default(2),
   maxDurationMs: z.number().int().min(1).max(900000).default(120000),
   cursor: state.nullable().optional(), checkpoint: state.nullable().optional(),
+  since: z.iso.datetime().optional(),
   range: z.object({ from: z.iso.datetime(), to: z.iso.datetime() }).strict().refine(r => Date.parse(r.from) < Date.parse(r.to)).optional(),
   operation: z.enum(['submissions', 'verify', 'verify_session', 'resolve']).optional(),
-}).strict();
+}).strict().refine(input => !(input.range && input.since), 'range 与 since 不能同时指定');
 export type QojReadJob = z.input<typeof qojReadJobSchema>;
 export interface QojHumanInput {
   kind: 'cloudflare' | 'login'; url: string; signal: AbortSignal;
@@ -141,7 +142,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
         account = await getConnector('qoj').resolveAccount(job.target, ctx); await onAccount?.(account);
         return { ...progress(), status: 'completed' as const, stopReason: 'more' as const, batchStatus: 'complete' as const };
       }
-      const result = await collectQojSubmissionPages({ handle: job.target, mode: job.mode, maxPages: job.maxPages, maxDurationMs: Math.max(1, job.maxDurationMs - (Date.now() - started)), cursor, checkpoint, range: job.range }, ctx, async page => {
+      const result = await collectQojSubmissionPages({ handle: job.target, mode: job.mode, maxPages: job.maxPages, maxDurationMs: Math.max(1, job.maxDurationMs - (Date.now() - started)), cursor, checkpoint, range: job.range, since: job.since }, ctx, async page => {
         signal.throwIfAborted();
         await onPage(page);
         pages++;

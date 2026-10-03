@@ -10,6 +10,13 @@ describe('platform collection contract', () => {
     expect(() => parsePlatformReadRequest({ platform, target: 'sample', password: 'must-not-persist' })).toThrow();
     expect(() => parsePlatformReadRequest({ platform, target: 'sample', minIntervalMs: 0 })).toThrow();
   });
+  it('validates an initial lower boundary and rejects range/lower-bound combinations', () => {
+    const input = { platform: 'codeforces', target: 'sample', since: '2026-09-03T16:00:00.000Z' };
+    expect(parsePlatformReadRequest(input).since).toBe(input.since);
+    expect(() => parsePlatformReadRequest({ ...input, since: 'not-a-date' })).toThrow();
+    expect(() => parsePlatformReadRequest({ ...input, range: { from: input.since, to: '2026-10-03T16:00:00.000Z' } })).toThrow();
+    expect(readRequestKey(input)).not.toBe(readRequestKey({ ...input, since: '2026-09-02T16:00:00.000Z' }));
+  });
   it('uses the original batch cursor for retries and makes equivalent requests deduplicate', () => {
     const input = { platform: 'qoj', target: 'sample', cursor: { version: 1, data: { page: 3 } } };
     expect(originalRetryInput(input).cursor).toEqual(input.cursor);

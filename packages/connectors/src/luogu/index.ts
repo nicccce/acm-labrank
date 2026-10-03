@@ -68,17 +68,17 @@ export async function fetchSubmissionPage(account: AccountRef, scan: SubmissionS
   const afterAnchorPages = cursor?.anchorSeen ? cursor.afterAnchorPages + 1 : 0;
   const checkpointReached = scan.mode === 'incremental' && anchorSeen && afterAnchorPages >= 2;
   const historyEnd = page * perPage >= count;
-  const rangeReached = rangeStartReached(submissions, scan.range);
+  const rangeReached = rangeStartReached(submissions, scan.range, scan.since);
   if (historyEnd || checkpointReached || rangeReached) {
     // Prove the head/count stayed stable before advancing a durable checkpoint.
     const finalHead = page === 1 ? current : await recordPage(uid, 1, ctx, observedAt);
     if (finalHead.records.count !== count || finalHead.records.perPage !== perPage || (finalHead.records.result[0]?.id ?? null) !== head) throw new ConnectorError('PAGINATION_DRIFT', '扫描期间首页变化；不推进 checkpoint');
     return filterSubmissionRange({ submissions, problems, nextCursor: null, stopReason: rangeReached ? 'range_start' : checkpointReached ? 'checkpoint_reached' : 'history_end',
-      nextCheckpoint: { version: 1, data: { parser: PARSER_VERSION, uid, head } }, coverage: 'visible', sourceUrl: current.url, observedAt }, scan.range);
+      nextCheckpoint: { version: 1, data: { parser: PARSER_VERSION, uid, head } }, coverage: 'visible', sourceUrl: current.url, observedAt }, scan.range, scan.since);
   }
   return filterSubmissionRange({ submissions, problems, nextCursor: { version: 1, data: { parser: PARSER_VERSION, uid, mode: scan.mode, page: page + 1,
     count, perPage, head, previousOldest: result.at(-1)!.id, anchorSeen, afterAnchorPages } },
-    nextCheckpoint: null, stopReason: 'more', coverage: 'visible', sourceUrl: current.url, observedAt }, scan.range);
+    nextCheckpoint: null, stopReason: 'more', coverage: 'visible', sourceUrl: current.url, observedAt }, scan.range, scan.since);
 }
 
 /** Lists are coverage evidence only; no submission/first-AC dates are generated. */

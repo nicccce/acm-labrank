@@ -27,6 +27,14 @@ describe('uniform platform reads', () => {
     await f.qoj.close();
   });
 
+  it.each(['codeforces', 'luogu', 'qoj'] as const)('passes the initial lower boundary to %s without claiming all-history completion', async platform => {
+    const f = setup(platform), since = '2026-09-03T16:00:00.000Z';
+    const result = await readPlatform({ platform, target: 'sample', since }, f.runtime);
+    expect(result).toMatchObject({ status: 'completed', historyComplete: false });
+    expect(f.adapter.fetchSubmissionPage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ since, range: undefined }), expect.anything());
+    await f.qoj.close();
+  });
+
   it.each(['codeforces', 'luogu', 'qoj'] as const)('returns the same result contract for %s', async platform => {
     const f = setup(platform);
     const result = await readPlatform({ platform, target: 'sample' }, f.runtime);

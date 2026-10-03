@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { Route } from '../packages/core/node_modules/playwright-core';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
@@ -53,10 +54,26 @@ try {
   await page.getByLabel('真实姓名（选填）').fill('乙同学'); await page.getByRole('button', { name: '保存姓名', exact: true }).click(); await page.getByRole('status').getByText('已保存', { exact: true }).waitFor();
   assert.equal((await (await api('/api/me', e)).json() as { realName: string }).realName, '乙同学');
   await page.getByRole('link', { name: '我的队伍', exact: true }).click();
+  let releaseSearch: (() => void) | undefined;
+  const delayedSearch = new Promise<void>(resolve => { releaseSearch = resolve; });
+  await page.route('**/api/members?*', async (route: Route) => {
+    if (new URL(route.request().url()).searchParams.get('q') === 'member_f') { const old = await route.fetch(); await delayedSearch; await route.fulfill({ response: old }).catch(() => undefined); }
+    else await route.continue();
+  });
+  await page.getByLabel('查找成员').fill('member_f'); await page.getByRole('button', { name: '搜索成员', exact: true }).click();
+  await page.getByLabel('查找成员').fill('member_c'); await page.getByLabel('查找成员').press('Enter');
+  await page.locator('.member-choice').filter({ hasText: 'member_c' }).waitFor();
+  releaseSearch!(); await page.waitForTimeout(300); assert.equal(await page.locator('.member-choice').filter({ hasText: 'member_f' }).count(), 0);
+  await page.unroute('**/api/members?*');
   await page.getByLabel('队伍名称').fill('UI EC'); await page.getByLabel('查找成员').fill('member_c'); await page.getByRole('button', { name: '搜索成员', exact: true }).click();
   await page.locator('.member-choice').filter({ hasText: 'member_c' }).getByRole('button', { name: '添加', exact: true }).click();
   await page.getByRole('button', { name: '创建队伍', exact: true }).click(); await page.waitForURL(/\/teams\/[a-f0-9-]+$/); await page.getByRole('heading', { name: 'UI EC', exact: true }).waitFor();
   const uiId = new URL(page.url()).pathname.split('/').at(-1)!;
+  await page.goto(`${base}/teams`);
+  await page.getByLabel('队伍名称').fill('duplicate name'); await page.getByLabel('查找成员').fill('member_c'); await page.getByRole('button', { name: '搜索成员', exact: true }).click();
+  await page.locator('.member-choice').filter({ hasText: 'member_c' }).getByRole('button', { name: '添加', exact: true }).click();
+  await page.getByRole('button', { name: '创建队伍', exact: true }).click(); await page.getByRole('status').getByText(/已存在相同成员/).waitFor();
+  await page.getByRole('link', { name: '查看已有队伍', exact: true }).click(); await page.waitForURL(`${base}/teams/${uiId}`); await page.getByRole('heading', { name: 'UI EC', exact: true }).waitFor();
   await page.getByLabel('队伍名称').fill('UI EC changed'); await page.getByRole('button', { name: '保存队伍', exact: true }).click(); await page.getByRole('heading', { name: 'UI EC changed', exact: true }).waitFor();
   const c = (await (await api('/api/members?q=member_c', e)).json() as { items: { id: string }[] }).items[0]!;
   await page.getByLabel('负责人', { exact: true }).selectOption(c.id); await page.getByRole('button', { name: '保存队伍', exact: true }).click(); await page.getByRole('button', { name: '退出队伍', exact: true }).waitFor();
@@ -72,13 +89,13 @@ try {
   const bContext = await browser.newContext(), bPage = await bContext.newPage(); bPage.on('pageerror', (error: Error) => errors.push(error.message));
   await bPage.goto(`${base}/login`); await bPage.getByLabel('用户名', { exact: true }).fill('member_b'); await bPage.getByLabel('密码', { exact: true }).fill(password); await bPage.getByRole('button', { name: '登录', exact: true }).click(); await bPage.waitForURL(`${base}/`);
   await bPage.goto(`${base}/profile`); const cf = bPage.locator('section').filter({ has: bPage.getByRole('heading', { name: 'Codeforces', exact: true }) });
-  await cf.getByLabel('Codeforces 用户名').fill('MissingMemberCF'); await cf.getByRole('button', { name: '保存账号', exact: true }).click(); await cf.getByText(/验证中/).waitFor();
+  await cf.getByLabel('Codeforces 用户名').fill('MissingMemberCF'); await cf.getByRole('button', { name: '保存账号', exact: true }).click(); await cf.getByText(/验证中|等待验证/).waitFor();
   await getPool().query("UPDATE platform_bindings SET candidate_state='not_found',candidate_error=$2 WHERE user_id=$1 AND platform='codeforces'", [b.user.id, JSON.stringify({ message: '账号不存在' })]);
   await cf.getByText(/MissingMemberCF · 账号不存在/).waitFor({ timeout: 15000 }); await cf.getByText('生效账号：MemberFixtureB', { exact: true }).waitFor();
   await cf.getByRole('button', { name: '解绑', exact: true }).click(); await cf.getByRole('button', { name: '确认解绑', exact: true }).click(); await cf.getByText('生效账号：未绑定', { exact: true }).waitFor();
   assert.equal((await (await api(`/api/members/${b.user.id}?from=2026-10-02&to=2026-10-02`, b)).json() as { points: number }).points, 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ event: 'member_ui_probe_passed', checks: ['shared login', 'real-name editing', 'create/edit/transfer/exit/archive views', 'date filters', 'first-AC and raw tabs', 'candidate polling retains old binding then unbind', 'desktop/mobile without overflow or exceptions'], screenshots: '/tmp/member-probe' }));
+  console.log(JSON.stringify({ event: 'member_ui_probe_passed', checks: ['superseded member search cannot replace latest results', 'duplicate create visibly returns existing team', 'shared login', 'real-name editing', 'create/edit/transfer/exit/archive views', 'date filters', 'first-AC and raw tabs', 'candidate polling retains old binding then unbind', 'desktop/mobile without overflow or exceptions'], screenshots: '/tmp/member-probe' }));
 } finally {
   await browser?.close(); await closeDb(); server.kill('SIGTERM');
   await new Promise<void>(resolve => { if (server.exitCode !== null) resolve(); else { server.once('exit', () => resolve()); setTimeout(() => { server.kill('SIGKILL'); resolve(); }, 5000).unref(); } });

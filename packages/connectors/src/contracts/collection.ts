@@ -11,6 +11,7 @@ export interface PlatformReadRequest {
   cursor?: ConnectorCursor | null;
   checkpoint?: ConnectorCheckpoint | null;
   pageSize?: number;
+  since?: string;
   range?: SubmissionRange;
   maxPages?: number;
   maxDurationMs?: number;

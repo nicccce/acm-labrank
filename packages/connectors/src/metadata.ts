@@ -9,3 +9,6 @@ export const platforms = [
 export function isPlatformId(input: string): input is PlatformId {
   return platforms.some((platform) => platform.id === input);
 }
+
+export const platformIds = ['codeforces', 'luogu', 'qoj'] as const satisfies readonly PlatformId[];
+export const platformNames: Record<string, string> = Object.fromEntries(platforms.map(p => [p.id, p.name])) as Record<PlatformId, string>;

@@ -10,12 +10,14 @@ export const platformReadRequestSchema = z.object({
   mode: z.enum(['backfill', 'incremental']).default('backfill'),
   cursor: state.nullable().default(null), checkpoint: state.nullable().default(null),
   pageSize: z.number().int().min(1).max(10000).optional(),
+  since: z.iso.datetime().optional(),
   range: z.object({ from: z.iso.datetime(), to: z.iso.datetime() }).strict().refine(r => Date.parse(r.from) < Date.parse(r.to), 'Invalid range').optional(),
   maxPages: z.number().int().min(1).max(1000).default(2),
   maxDurationMs: z.number().int().min(1).max(900000).default(120000),
   withProfile: z.boolean().default(false), withRating: z.boolean().default(false),
   contestId: z.string().min(1).max(30).optional(), index: z.string().min(1).max(16).optional(),
 }).strict().superRefine((input, ctx) => {
+  if (input.range && input.since) ctx.addIssue({ code: 'custom', message: 'range 与 since 不能同时指定' });
   if (input.platform === 'luogu' && input.maxPages > 100) ctx.addIssue({ code: 'custom', message: '洛谷每批最多 100 页' });
   if (input.operation === 'verify' && (input.cursor !== null || input.checkpoint !== null)) ctx.addIssue({ code: 'custom', message: '连接核验不接受续跑状态' });
 });

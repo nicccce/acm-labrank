@@ -90,7 +90,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
       if (!['submissions', 'verify', 'verify_session', 'resolve'].includes(request.operation) || request.pageSize !== undefined || request.contestId !== undefined) throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported QOJ read capability');
       if (!runtime.qoj) throw new ConnectorError('NOT_IMPLEMENTED', 'QOJ runtime is required');
       if (runtime.qoj.connectionId !== request.connectionId) throw new ConnectorError('INVALID_INPUT', 'QOJ runtime connection mismatch');
-      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify' | 'verify_session' | 'resolve', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, range: request.range, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation, runtime.onAccount, beforeRequest);
+      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify' | 'verify_session' | 'resolve', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, range: request.range, since: request.since, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation, runtime.onAccount, beforeRequest);
       outcome.account = result.account;
       outcome.collector = result.collector;
       outcome.data.submissions = result.submissions; outcome.data.problems = result.problems;
@@ -139,7 +139,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
   } finally {
     try {
       if (connection && (outcome.status === 'auth_required' || outcome.status === 'human_input_required')) await setCollectionConnectionFailure(connection.id, connection.generation, outcome.status);
-      outcome.historyComplete = !request.range && request.operation === 'submissions' && outcome.status === 'completed' && outcome.stopReason === 'history_end';
+      outcome.historyComplete = !request.range && !request.since && request.operation === 'submissions' && outcome.status === 'completed' && outcome.stopReason === 'history_end';
       if (persist && claimed) await finishReadRun(runId, outcome, readOutcomeSummary(outcome));
     } finally { await task?.release(); }
   }

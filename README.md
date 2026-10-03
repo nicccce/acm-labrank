@@ -109,4 +109,6 @@ Compose 按 `db healthy → migrate 成功 → bootstrap 成功 → web / worker
 
 认证入口为 `/api/auth/register`、`login`、`session`、`logout`。写请求校验 Origin；退出及管理员写接口还校验 `X-CSRF-Token`。密码用 Argon2id，会话 token 仅以哈希入库，Cookie 使用 HttpOnly/SameSite=Lax；HTTPS 时 Secure。
 
-发布包含新迁移的版本时，先备份并停止旧 worker，执行迁移，再部署匹配的新 Web/worker。QOJ 浏览器重建可能丢失登录状态，需准备人工重新鉴权。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
+发布包含新迁移的版本时，先备份、暂停采集并等待活动任务结束，执行迁移，再部署匹配的新 Web/worker。保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)替换 Node worker，保持容器及 Chromium 运行。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
+
+当前采集策略：首次近 30 天、每批 3 页/120 秒，之后持续增量；榜单日期只控制查询，历史补采单独执行。结构与功能缺口见[项目实现状态](docs/项目实现状态.md)。

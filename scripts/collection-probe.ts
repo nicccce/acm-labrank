@@ -15,6 +15,7 @@ async function resetQuota(platform: string) {
 }
 try {
   await boss.start();
+  await pool.query('UPDATE collection_control SET enabled=true WHERE id=1');
   assert.equal(Number((await pool.query('SELECT count(*) FROM platform_read_runs')).rows[0].count), 0, 'Probe requires a fresh isolated database; recreate acm_architecture_verify before rerunning');
   const password = randomUUID() + randomUUID();
   const passwordHash = await hashPassword(password);

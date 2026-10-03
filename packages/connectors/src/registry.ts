@@ -4,6 +4,7 @@ import { codeforcesConnector } from './codeforces/index';
 import { qojConnector } from './qoj/index';
 import { luoguConnector } from './luogu/index';
 export { luoguLogin } from './luogu/login';
+export type { LuoguLoginState } from './luogu/login';
 export { fetchPractice as fetchLuoguPractice } from './luogu/index';
 export { qojLogin } from './qoj/login';
 export { qojResponseIssue } from './qoj/http';

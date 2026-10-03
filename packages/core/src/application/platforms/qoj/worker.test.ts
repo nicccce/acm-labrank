@@ -20,6 +20,13 @@ function html(body: string, url: URL, status = 200) {
   return response;
 }
 const normal = async (url: URL) => html(url.pathname === '/' ? identity : url.pathname.startsWith('/user/') ? profile : url.searchParams.get('page') === '2' ? fixture('last').replace('>41<', '>2<') : fixture('normal'), url);
+it('verifies only session identity without profiles or submission lists', async () => {
+  const requests: string[] = [];
+  const f = fake(async url => { requests.push(url.pathname); return normal(url); });
+  const worker = createQojReadWorker(f.options);
+  expect(await worker.execute({ ...job, operation: 'verify_session' }, new AbortController().signal)).toMatchObject({ status: 'completed', collector: 'collector', pages: 0, account: null, submissions: [] });
+  expect(requests).toEqual(['/']); await worker.close();
+});
 
 it('recovers a 200 challenge only after identity verification and a fresh original navigation', async () => {
   let cleared = false;

@@ -23,7 +23,7 @@ export const normalizedSubmissionSchema = z.object({
   subjectEvidence: z.object({ authorAccountKeys: z.array(z.string()).min(1), authorHandle: z.string(), contestId: z.string().optional(), contest: z.object({ id: z.string(), name: z.string().optional(), mode: z.string().optional() }).optional() }),
   parserVersion: z.literal(PARSER_VERSION), observedAt: z.iso.datetime(),
 });
-export const normalizedProblemSchema = z.object({ platform: z.literal('luogu'), problemKey: z.string(), title: z.string(), nativeDifficulty: z.number().int().min(1).max(8).nullable(), sourceUrl: z.url(), parserVersion: z.literal(PARSER_VERSION), observedAt: z.iso.datetime() });
+export const normalizedProblemSchema = z.object({ platform: z.literal('luogu'), problemKey: z.string(), title: z.string(), nativeDifficulty: z.number().int().min(1).max(8).nullable(), difficultyObserved: z.boolean().optional(), sourceUrl: z.url(), parserVersion: z.literal(PARSER_VERSION), observedAt: z.iso.datetime() });
 
 export function validated<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -118,7 +118,7 @@ export function normalizeRecords(value: unknown, uid: string, observedAt: string
       sourceUrl: `${ORIGIN}/record/${record.id}`, subjectEvidence: { authorAccountKeys: [uid], authorHandle: record.user.name, ...(contest ? { contestId: contest.id, contest } : {}) },
       parserVersion: PARSER_VERSION, observedAt,
     }));
-    if (record.problem) problems.set(record.problem.pid, validated(normalizedProblemSchema, { platform: 'luogu', problemKey: record.problem.pid, title: record.problem.name, nativeDifficulty: mapDifficulty(record.problem.difficulty), sourceUrl: `${ORIGIN}/problem/${encodeURIComponent(record.problem.pid)}`, parserVersion: PARSER_VERSION, observedAt }));
+    if (record.problem) problems.set(record.problem.pid, validated(normalizedProblemSchema, { platform: 'luogu', problemKey: record.problem.pid, title: record.problem.name, nativeDifficulty: mapDifficulty(record.problem.difficulty), difficultyObserved: record.problem.difficulty !== undefined, sourceUrl: `${ORIGIN}/problem/${encodeURIComponent(record.problem.pid)}`, parserVersion: PARSER_VERSION, observedAt }));
   }
   return { records, submissions, problems: [...problems.values()] };
 }

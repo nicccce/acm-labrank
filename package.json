@@ -27,7 +27,11 @@
     "qoj:confirm": "tsx --env-file-if-exists=.env scripts/qoj-confirm.ts",
     "qoj:cancel-probe": "tsx --env-file-if-exists=.env scripts/qoj-queue-probe.ts",
     "luogu:read": "tsx --env-file-if-exists=.env apps/worker/src/luogu.ts",
-    "collection:probe": "tsx --env-file-if-exists=.env scripts/collection-probe.ts"
+    "collection:probe": "tsx --env-file-if-exists=.env scripts/collection-probe.ts",
+    "members:seed": "tsx --env-file-if-exists=.env scripts/seed-members.ts",
+    "personal:probe": "tsx --env-file-if-exists=.env scripts/personal-probe.ts",
+    "personal:verify": "tsx --env-file-if-exists=.env scripts/verify-personal.ts",
+    "web:probe": "tsx --env-file-if-exists=.env scripts/web-probe.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

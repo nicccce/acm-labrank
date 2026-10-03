@@ -2,9 +2,10 @@ import { z } from 'zod';
 import { getConnector } from '@acm/connectors/server';
 import { ConnectorError, type PlatformId } from '@acm/connectors/contracts';
 import { platforms, isPlatformId } from '@acm/connectors/metadata';
-import { getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy } from '@acm/db/server';
+import { getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy, getCollectionControl, setCollectionControl, disconnectCollectionConnection } from '@acm/db/server';
 import { AppError } from '../errors';
 import { requestPlatformRead, retryPlatformRead } from './jobs';
+import { requireCollectionEnabled } from '../personal';
 
 export const adminRunIdSchema = z.uuid();
 export function adminPlatform(value: string): PlatformId {
@@ -28,7 +29,7 @@ export async function getAdminPlatforms() {
       rateLimit: policies.find(policy => policy.platform === platform.id) ?? null,
       connection: platform.requiresLogin ? connections.find(connection => connection.id === connectionId && connection.platform === platform.id) ?? { id: connectionId, state: 'unknown', collector: null, generation: 0, verifiedAt: null } : { state: 'not_required', collector: null },
       latestFailure: runs.find(run => run.platform === platform.id && !['queued', 'running', 'completed'].includes(run.status)) ?? null,
-      authentication: platform.id === 'codeforces' ? { kind: 'none' } : platform.id === 'luogu' ? { kind: 'cli_captcha', command: 'pnpm luogu:read --login --account TARGET --username COLLECTOR' } : { kind: 'browser_manual', instruction: '在专用浏览器完成登录或挑战后，调用连接核验接口。' },
+      authentication: platform.id === 'codeforces' ? { kind: 'none' } : platform.id === 'luogu' ? { kind: 'web_captcha', readingPermission: connections.find(c => c.id === connectionId)?.readingVerifiedAt ? 'verified' : 'unverified' } : { kind: 'embedded_novnc', url: process.env.QOJ_VNC_URL ?? 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale', readingPermission: connections.find(c => c.id === connectionId)?.readingVerifiedAt ? 'verified' : 'unverified' },
     };
   }) };
 }
@@ -60,15 +61,34 @@ export async function getAdminReadRun(id: string) {
   if (!run) throw new AppError('NOT_FOUND', '读取记录不存在', 404);
   return run;
 }
-export async function requestAdminRead(input: unknown, actorId: string) { return collectionAdminCall(() => requestPlatformRead(input, { actorId })); }
+export async function requestAdminRead(input: unknown, actorId: string) { await requireCollectionEnabled(); return collectionAdminCall(() => requestPlatformRead(input, { actorId })); }
 export async function retryAdminRead(id: string, actorId: string) {
+  await requireCollectionEnabled();
   const run = await getAdminReadRun(id);
   if (['queued', 'running', 'completed', 'cancelled'].includes(run.status)) throw new AppError('STATE_CONFLICT', '当前状态不支持重试', 409);
   return collectionAdminCall(() => retryPlatformRead(id, actorId));
 }
 export async function verifyAdminConnection(platform: PlatformId, input: unknown, actorId: string) {
+  await requireCollectionEnabled();
   if (platform === 'codeforces') return { requiresLogin: false, state: 'not_required' };
   const parsed = z.object({ target: z.string().min(1).max(128) }).strict().safeParse(input);
   if (!parsed.success) throw new AppError('INVALID_INPUT', '请指定核验读取目标', 400);
   return collectionAdminCall(() => requestPlatformRead({ platform, target: parsed.data.target, operation: 'verify' }, { actorId }));
+}
+export const getAdminCollectionControl = getCollectionControl;
+export async function changeAdminCollectionControl(input: unknown, actorId: string) {
+  const parsed = z.object({ enabled: z.boolean(), version: z.number().int().positive() }).strict().safeParse(input);
+  if (!parsed.success) throw new AppError('INVALID_INPUT', '采集开关参数不合法', 400);
+  await getCollectionControl();
+  const value = await setCollectionControl(parsed.data.enabled, parsed.data.version, actorId);
+  if (!value) throw new AppError('VERSION_CONFLICT', '采集开关已变化，请刷新', 409); return value;
+}
+export async function requestAdminSessionVerification(platform: string, actorId: string) {
+  if (platform !== 'qoj') throw new AppError('NOT_IMPLEMENTED', '洛谷请使用验证码登录', 422);
+  return collectionAdminCall(() => requestPlatformRead({ platform: 'qoj', target: '__identity__', operation: 'verify_session', maxDurationMs: 120000 }, { actorId }));
+}
+export async function disconnectAdminConnection(platform: string, actorId: string) {
+  if (!['qoj', 'luogu'].includes(platform)) throw new AppError('INVALID_INPUT', '该平台不需要登录', 400);
+  const id = process.env[platform === 'qoj' ? 'QOJ_CONNECTION_ID' : 'LUOGU_CONNECTION_ID'] ?? `${platform}-lab`;
+  await disconnectCollectionConnection(id, platform, actorId); return { disconnected: true };
 }

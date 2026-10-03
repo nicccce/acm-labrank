@@ -1,4 +1,4 @@
-import type { AccountRef, ConnectorCheckpoint, ConnectorCursor, ConnectorErrorCode, NormalizedProblem, NormalizedSubmission, PlatformId, Profile, RatingHistory, SubmissionPage } from './index';
+import type { AccountRef, ConnectorCheckpoint, ConnectorCursor, ConnectorErrorCode, NormalizedProblem, NormalizedSubmission, PlatformId, Profile, RatingHistory, SubmissionPage, SubmissionRange } from './index';
 
 export type ReadStatus = 'completed' | 'auth_required' | 'human_input_required' | 'restricted' | 'parse_changed' | 'timeout' | 'cancelled' | 'failed';
 export type ReadAction = 'none' | 'retry' | 'reauthenticate' | 'human_verify' | 'fix_target' | 'fix_parser' | 'unsupported';
@@ -6,11 +6,12 @@ export interface PlatformReadRequest {
   platform: PlatformId;
   target: string;
   connectionId?: string;
-  operation?: 'submissions' | 'verify' | 'contests' | 'standings' | 'problem';
+  operation?: 'submissions' | 'verify' | 'verify_session' | 'resolve' | 'contests' | 'standings' | 'problem';
   mode?: 'backfill' | 'incremental';
   cursor?: ConnectorCursor | null;
   checkpoint?: ConnectorCheckpoint | null;
   pageSize?: number;
+  range?: SubmissionRange;
   maxPages?: number;
   maxDurationMs?: number;
   withProfile?: boolean;

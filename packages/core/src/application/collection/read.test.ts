@@ -18,6 +18,15 @@ function setup(platform: PlatformId) {
 }
 beforeEach(() => vi.clearAllMocks());
 describe('uniform platform reads', () => {
+  it.each(['codeforces', 'luogu', 'qoj'] as const)('passes collection dates through the %s runtime and does not claim complete history', async platform => {
+    const f = setup(platform);
+    const range = { from: '2026-10-01T16:00:00.000Z', to: '2026-10-02T16:00:00.000Z' };
+    const result = await readPlatform({ platform, target: 'sample', range }, f.runtime);
+    expect(result).toMatchObject({ status: 'completed', historyComplete: false });
+    expect(f.adapter.fetchSubmissionPage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ range }), expect.anything());
+    await f.qoj.close();
+  });
+
   it.each(['codeforces', 'luogu', 'qoj'] as const)('returns the same result contract for %s', async platform => {
     const f = setup(platform);
     const result = await readPlatform({ platform, target: 'sample' }, f.runtime);

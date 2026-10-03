@@ -22,6 +22,27 @@
       "when": 1790940379795,
       "tag": "0002_empty_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790954313560,
+      "tag": "0003_mighty_gamora",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790955872811,
+      "tag": "0004_ambiguous_spitfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790966555658,
+      "tag": "0005_magenta_roland_deschain",
+      "breakpoints": true
     }
   ]
 }

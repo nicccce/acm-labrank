@@ -26,10 +26,8 @@ export async function beginLuoguLogin(options: { username: string; connectionId:
     async refresh(version: number) { challenge = await luoguLogin.refreshChallenge(challenge.state, version, session.ctx); },
     async complete(input: { version: number; password: string; captcha: string; expectedHandle: string }) {
       const identity = await luoguLogin.advanceLogin(challenge.state, input, session.ctx);
-      const result = await collectLuogu({ account: options.target, connectionId: options.connectionId, mode: 'backfill', signal: options.signal, maxPages: 2, context: session.ctx });
-      if (result.collector.uid !== identity.uid) throw new Error('SESSION_IDENTITY_CHANGED');
       await session.promote(identity.uid);
-      return result;
+      return { identity, readingPermission: 'unverified' as const };
     },
   };
 }

@@ -66,7 +66,7 @@ const wrapper = z.object({ version: z.literal(1), data: z.unknown() });
 export const pageSchema = z.object({
   submissions: z.array(normalizedSubmissionSchema), problems: z.array(normalizedProblemSchema),
   nextCursor: wrapper.nullable(), nextCheckpoint: wrapper.nullable(),
-  stopReason: z.enum(['more', 'history_end', 'checkpoint_reached']), coverage: z.literal('visible'),
+  stopReason: z.enum(['more', 'history_end', 'checkpoint_reached', 'range_start']), coverage: z.literal('visible'),
   sourceUrl: z.url(), observedAt: utc,
 });
 export const profileSchema = z.object({

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ConnectorError, parseRetryAfter, type AccountRef, type ConnectorCheckpoint, type ReadConnector, type RequestContext, type SubmissionScan } from '../contracts/index';
+import { ConnectorError, parseRetryAfter, rangeStartReached, filterSubmissionRange, type AccountRef, type ConnectorCheckpoint, type ReadConnector, type RequestContext, type SubmissionScan } from '../contracts/index';
 import { contestPath, normalizeProblem, normalizeSubmission, PARSER_VERSION, utc, validated } from './parser';
 import {
   accountSchema, contestSchema, envelopeSchema, normalizedContestSchema, normalizedRatingSchema,
@@ -129,25 +129,26 @@ async function fetchPage(account: AccountRef, scan: SubmissionScan, ctx: Request
   const base = { submissions, problems, coverage: 'visible' as const, sourceUrl: url.href, observedAt };
   // An offset that no longer contains the prior boundary cannot be trusted, including an empty page.
   if (state.anchor && !raw.some((row) => String(row.id) === state.anchor)) {
-    return validated(pageSchema, { ...base, nextCursor: { version: 1, data: { ...state, from: 1, anchor: null, seekAnchor: state.anchor, olderPages: 0 } }, stopReason: 'more', nextCheckpoint: null });
+    return filterSubmissionRange(validated(pageSchema, { ...base, nextCursor: { version: 1, data: { ...state, from: 1, anchor: null, seekAnchor: state.anchor, olderPages: 0 } }, stopReason: 'more', nextCheckpoint: null }), scan.range);
   }
   const locating = state.seekAnchor !== null && !raw.some((row) => String(row.id) === state.seekAnchor);
   const older = scan.mode === 'incremental' && checkpoint?.highWaterId && raw.length > 0 && raw.every((row) =>
     BigInt(row.id) <= BigInt(checkpoint.highWaterId!) && row.creationTimeSeconds * 1000 < Date.parse(checkpoint.startedAt) - LOOKBACK_MS);
   const olderPages = !locating && older ? state.olderPages + 1 : 0;
-  const finished = raw.length === 0 || olderPages >= 2;
-  const nextCheckpoint: ConnectorCheckpoint | null = finished && scan.mode === 'incremental' ? {
+  const rangeReached = !locating && rangeStartReached(submissions, scan.range);
+  const finished = raw.length === 0 || olderPages >= 2 || rangeReached;
+  const nextCheckpoint: ConnectorCheckpoint | null = finished && (scan.mode === 'incremental' || scan.range) ? {
     version: 1, data: { handle, scope, parserVersion: PARSER_VERSION, highWaterId: state.headId, startedAt: state.startedAt },
   } : null;
   const overlap = Math.max(1, Math.floor(state.pageSize * 0.2));
-  return validated(pageSchema, {
-    ...base, stopReason: raw.length === 0 ? 'history_end' : finished ? 'checkpoint_reached' : 'more', nextCheckpoint,
+  return filterSubmissionRange(validated(pageSchema, {
+    ...base, stopReason: rangeReached ? 'range_start' : raw.length === 0 ? 'history_end' : finished ? 'checkpoint_reached' : 'more', nextCheckpoint,
     nextCursor: finished ? null : { version: 1, data: {
       ...state, from: state.from + raw.length - (raw.length === state.pageSize ? overlap : 0),
       anchor: locating || raw.length < state.pageSize ? null : String(raw.at(-1)!.id),
       seekAnchor: locating ? state.seekAnchor : null, olderPages,
     } },
-  });
+  }), scan.range);
 }
 
 function normalizeContest(raw: z.infer<typeof contestSchema>, observedAt: string) {

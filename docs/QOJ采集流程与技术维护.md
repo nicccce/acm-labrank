@@ -6,6 +6,8 @@
 
 ## 日常读取流程
 
+当前默认入口为 [管理员连接页](http://localhost:3000/admin/connections)，页面内嵌 noVNC，登录后点击身份核验；默认 Compose 不再要求 CLI 接管确认。初次部署暂停提交采集，管理员完成登录并确认后才启用，详见[个人后端与 Web 登录](个人后端与Web登录.md)。下面 CLI 命令用于启用后的诊断读取，状态文件和 job.output 不替代正式个人同步的数据库游标。本文后面的人工启动/接管段属于旧维护模式，默认 Compose 固定关闭该模式；如需维护使用，须显式增加独立覆盖配置。
+
 所有命令在仓库根目录执行；以下用容器内的 Node.js 和 pnpm。命令要求已部署包含公共采集接口的新版本及匹配迁移。
 
 ### 使用当前登录浏览器
@@ -228,7 +230,9 @@ QOJ_LOGIN_HANDLE 可在应用处理器中限制采集身份；当前浏览器 Co
 | qoj_debug_failed | 检查参数、state目标/模式、checkpoint格式、Secret和CDP地址。先看配置，不重启已登录浏览器。 |
 | CLI 已输出结果但不退出 | 核对是否使用有 CDP 断开修复的代码，不调用默认 context.close 或强杀浏览器。 |
 
-本机 Docker Desktop 曾无法直连外网，实测用受限 TLS CONNECT 诊断代理访问 QOJ，不解密 TLS；生产服务器应直连或使用批准的代理，不依赖本机 `.local/qoj-connect-proxy.mjs`。修改代理配置需要重建/重启浏览器才能改变启动参数，应安排重新人工登录。
+`compose.qoj-browser.yaml` 默认启动内部 `qoj-relay`。它只允许到 QOJ 与 Cloudflare challenge 的 TLS CONNECT，不解密 TLS，也不接触密码或响应正文。如果 Docker 能建立 TCP 却无法完成 TLS，而宿主机代理可以访问，在 `.env` 设置 `QOJ_RELAY_UPSTREAM=http://host.docker.internal:7890`（端口按本机配置），执行 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --no-deps --force-recreate qoj-relay`。只替换中继，浏览器及已登录状态保留，然后刷新 QOJ 页面。中继脚本以只读方式挂载，代理连接超时或拒绝返回 502。
+
+`QOJ_BROWSER_PROXY_SERVER` 用于替换 Chromium 本身的代理入口；修改它需要重启浏览器，应安排重新人工登录。优先通过 `QOJ_RELAY_UPSTREAM` 调整出口，宿主机代理必须保持运行。
 
 取消单项正式任务应使用 pg-boss 的 `boss.cancel(QOJ_READ_QUEUE, jobId)`，由 job.signal 和 heartbeat 通知 Worker 释放页面；不要停止整个 Worker 容器。`pnpm qoj:cancel-probe` 会另建真实测试任务，不是取消任意现有 job 的命令。直接 CLI 可用交互式 Ctrl+C 取消；不要手动删除正在使用的 state 文件或确认文件。
 

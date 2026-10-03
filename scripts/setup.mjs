@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const secrets = resolve(root, '.secrets');
 await mkdir(secrets, { recursive: true, mode: 0o700 });
-for (const [name, bytes] of [['session-encryption-key', 32], ['admin-bootstrap-password', 24], ['qoj-vnc-password', 6]]) {
+for (const [name, bytes] of [['session-encryption-key', 32], ['admin-bootstrap-password', 24], ['member-test-password', 24], ['qoj-vnc-password', 6]]) {
   const path = resolve(secrets, name);
   if (!existsSync(path)) await writeFile(path, randomBytes(bytes).toString(name === 'qoj-vnc-password' ? 'base64' : 'hex'), { flag: 'wx', mode: 0o600 });
 }
@@ -18,7 +18,7 @@ if (process.platform === 'win32') {
   execFileSync('icacls', [secrets, '/inheritance:r', '/grant:r', ...principals, 'SYSTEM:(OI)(CI)F'], { stdio: 'ignore' });
 } else {
   await chmod(secrets, 0o700);
-  for (const name of ['session-encryption-key', 'admin-bootstrap-password', 'qoj-vnc-password']) await chmod(resolve(secrets, name), 0o600);
+  for (const name of ['session-encryption-key', 'admin-bootstrap-password', 'member-test-password', 'qoj-vnc-password']) await chmod(resolve(secrets, name), 0o600);
 }
 const envPath = resolve(root, '.env');
 if (!existsSync(envPath)) {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ConnectorError, type ConnectorErrorCode, type PlatformReadOutcome, type RequestContext, type SubmissionPage } from '@acm/connectors/contracts';
 import { getConnector, luoguLogin } from '@acm/connectors/server';
-import { createDirectReadRun, ensureCollectionConnection, finishReadRun, getReadRun, setCollectionConnectionFailure, startReadRun, verifyCollectionConnection, writeReadGeneration, writeReadProgress, type CollectionConnection } from '@acm/db/server';
+import { createDirectReadRun, ensureCollectionConnection, finishReadRun, getReadRun, getCollectionControl, markReadingPermission, setCollectionConnectionFailure, startReadRun, verifyCollectionConnection, writeReadGeneration, writeReadProgress, type CollectionConnection } from '@acm/db/server';
 import { createCodeforcesReadContext } from '../platforms/codeforces/read';
 import { createLuoguRequestContext } from '../platforms/luogu/session';
 import type { createQojReadWorker } from '../platforms/qoj/worker';
@@ -15,6 +15,7 @@ export interface ReadRuntimeOptions {
   qoj?: Pick<ReturnType<typeof createQojReadWorker>, 'execute' | 'connectionId'>;
   context?: RequestContext;
   onPage?: (page: SubmissionPage) => Promise<void>;
+  onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>;
   runId?: string;
   job?: { id: string; queue: string };
   /** Explicit test/debug mode; API and deployed jobs always persist. */
@@ -48,6 +49,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
   const problems = new Set<string>();
   try {
     if (persist) { claimed = await startReadRun(runId, null); if (!claimed) throw new ConnectorError('INVALID_INPUT', 'Read run is already claimed'); }
+    if (persist && request.operation !== 'verify_session' && !(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
     if (persist && request.connectionId) connection = await ensureCollectionConnection(request.connectionId, request.platform);
     if (connection) {
       task = await holdConnectionTask(connection.id, signal);
@@ -55,10 +57,11 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
       // Login/verification may have finished while this task waited for the connection lease.
       connection = await ensureCollectionConnection(connection.id, request.platform);
       await writeReadGeneration(runId, connection.generation);
-      if (request.operation !== 'verify' && ['auth_required', 'human_input_required'].includes(connection.state)) throw new ConnectorError(connection.state === 'auth_required' ? 'AUTH_REQUIRED' : 'CHALLENGE_REQUIRED', 'Collecting connection is paused');
+      if (!['verify', 'verify_session'].includes(request.operation) && ['auth_required', 'human_input_required'].includes(connection.state)) throw new ConnectorError(connection.state === 'auth_required' ? 'AUTH_REQUIRED' : 'CHALLENGE_REQUIRED', 'Collecting connection is paused');
     }
     const onPage = async (page: SubmissionPage) => {
       signal.throwIfAborted();
+      if (persist && !(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
       await runtime.onPage?.(page);
       const nextSeen = new Set(seen), nextProblems = new Set(problems);
       for (const row of page.submissions) nextSeen.add(row.externalSubmissionId);
@@ -72,10 +75,10 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
     const connector = getConnector(request.platform);
     if ((request.withProfile && !connector.fetchProfile) || (request.withRating && !connector.fetchRatingHistory)) throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported optional capability');
     if (request.platform === 'qoj') {
-      if (!['submissions', 'verify'].includes(request.operation) || request.pageSize !== undefined || request.contestId !== undefined) throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported QOJ read capability');
+      if (!['submissions', 'verify', 'verify_session', 'resolve'].includes(request.operation) || request.pageSize !== undefined || request.contestId !== undefined) throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported QOJ read capability');
       if (!runtime.qoj) throw new ConnectorError('NOT_IMPLEMENTED', 'QOJ runtime is required');
       if (runtime.qoj.connectionId !== request.connectionId) throw new ConnectorError('INVALID_INPUT', 'QOJ runtime connection mismatch');
-      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation);
+      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify' | 'verify_session' | 'resolve', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, range: request.range, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation, runtime.onAccount);
       outcome.account = result.account;
       outcome.collector = result.collector;
       outcome.data.submissions = result.submissions; outcome.data.problems = result.problems;
@@ -92,12 +95,14 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
         : createCodeforcesReadContext(signal));
       const ctx: RequestContext = { ...rawCtx, signal, request: (url, init) => rawCtx.request(url, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }) };
       if (request.platform === 'luogu') outcome.collector = (await luoguLogin.verifySession(ctx)).uid;
-      if (!['submissions', 'verify'].includes(request.operation)) {
+      if (request.operation === 'verify_session') { outcome.batchStatus = 'complete'; }
+      else if (request.operation === 'resolve') { outcome.account = await connector.resolveAccount(request.target, ctx); await runtime.onAccount?.(outcome.account); outcome.batchStatus = 'complete'; }
+      else if (!['submissions', 'verify'].includes(request.operation)) {
         if (request.platform !== 'codeforces') throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported platform auxiliary operation');
         outcome.data.auxiliary = await readCodeforcesContest({ operation: request.operation as 'contests' | 'standings' | 'problem', contestId: request.contestId, index: request.index }, ctx);
         outcome.batchStatus = 'complete';
       } else {
-        const result = await readAccount({ ...request, handle: request.target }, ctx, onPage);
+        const result = await readAccount({ ...request, handle: request.target }, ctx, onPage, runtime.onAccount);
         outcome.account = result.account; outcome.data.submissions = result.submissions; outcome.data.problems = result.problems;
         outcome.data.profile = result.profile ?? null; outcome.data.ratingHistory = result.ratingHistory ?? null;
         outcome.batchStatus = result.batchStatus; outcome.stopReason = result.stopReason;
@@ -107,9 +112,11 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
     }
     signal.throwIfAborted();
     if (task) await task.check();
-    if (connection && outcome.status === 'completed' && outcome.collector && (request.operation === 'verify' || connection.state !== 'ready')) {
+    if (connection && outcome.status === 'completed' && outcome.collector && (['verify', 'verify_session'].includes(request.operation) || connection.state !== 'ready')) {
       if (!await verifyCollectionConnection(connection.id, connection.generation, outcome.collector, task?.token)) throw new ConnectorError('LEASE_LOST', 'Connection changed before verification');
+      connection.generation++;
     }
+    if (connection && persist && outcome.status === 'completed' && outcome.progress.pages > 0) await markReadingPermission(connection.id, connection.generation);
   } catch (error) {
     if (!claimed) throw error;
     if (error instanceof AccountReadError) { outcome.account = error.progress.account; outcome.data.submissions = error.progress.submissions; outcome.data.problems = error.progress.problems; }
@@ -120,7 +127,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
   } finally {
     try {
       if (connection && (outcome.status === 'auth_required' || outcome.status === 'human_input_required')) await setCollectionConnectionFailure(connection.id, connection.generation, outcome.status);
-      outcome.historyComplete = request.operation === 'submissions' && outcome.status === 'completed' && outcome.stopReason === 'history_end';
+      outcome.historyComplete = !request.range && request.operation === 'submissions' && outcome.status === 'completed' && outcome.stopReason === 'history_end';
       if (persist && claimed) await finishReadRun(runId, outcome, readOutcomeSummary(outcome));
     } finally { await task?.release(); }
   }

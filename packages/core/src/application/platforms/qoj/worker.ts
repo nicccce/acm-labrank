@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ConnectorError, type ConnectorCheckpoint, type ConnectorCursor, type NormalizedSubmission, type NormalizedProblem, type RequestContext, type SubmissionPage } from '@acm/connectors/contracts';
-import { qojLogin, qojResponseIssue } from '@acm/connectors/server';
+import { getConnector, qojLogin, qojResponseIssue } from '@acm/connectors/server';
 import { createQojBrowserRequestContext } from './browser';
 import { createQojRequestContext } from './session';
 import { createAbortableLock } from '../../collection/abortable-lock';
@@ -15,7 +15,8 @@ export const qojReadJobSchema = z.object({
   maxPages: z.number().int().min(1).max(1000).default(2),
   maxDurationMs: z.number().int().min(1).max(900000).default(120000),
   cursor: state.nullable().optional(), checkpoint: state.nullable().optional(),
-  operation: z.enum(['submissions', 'verify']).optional(),
+  range: z.object({ from: z.iso.datetime(), to: z.iso.datetime() }).strict().refine(r => Date.parse(r.from) < Date.parse(r.to)).optional(),
+  operation: z.enum(['submissions', 'verify', 'verify_session', 'resolve']).optional(),
 }).strict();
 export type QojReadJob = z.input<typeof qojReadJobSchema>;
 export interface QojHumanInput {
@@ -51,7 +52,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
   const humanRetries = options.humanRetries ?? 2;
   if (!Number.isInteger(humanTimeout) || humanTimeout < 1 || humanTimeout > 600000 || !Number.isInteger(humanRetries) || humanRetries < 0 || humanRetries > 5) throw new ConnectorError('INVALID_INPUT', 'Invalid QOJ human input limits');
 
-  async function execute(input: QojReadJob, taskSignal: AbortSignal, onPage: (page: SubmissionPage) => Promise<void> = async () => undefined, generation?: number) {
+  async function execute(input: QojReadJob, taskSignal: AbortSignal, onPage: (page: SubmissionPage) => Promise<void> = async () => undefined, generation?: number, onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>) {
     const job = qojReadJobSchema.parse(input);
     const started = Date.now();
     const budget = AbortSignal.timeout(job.maxDurationMs);
@@ -130,11 +131,16 @@ export function createQojReadWorker(options: QojWorkerOptions) {
         if (options.expectedLoginHandle && identity !== options.expectedLoginHandle) throw new ConnectorError('AUTH_REQUIRED', 'QOJ collecting identity mismatch');
         attachmentIdentityVerified = true;
       }
-      if (job.operation === 'verify') {
+      if (job.operation === 'verify' || job.operation === 'verify_session') {
         collector = await qojLogin.verifySession(ctx);
         if (options.expectedLoginHandle && collector !== options.expectedLoginHandle) throw new ConnectorError('AUTH_REQUIRED', 'QOJ collecting identity mismatch');
       }
-      const result = await collectQojSubmissionPages({ handle: job.target, mode: job.mode, maxPages: job.maxPages, maxDurationMs: Math.max(1, job.maxDurationMs - (Date.now() - started)), cursor, checkpoint }, ctx, async page => {
+      if (job.operation === 'verify_session') return { ...progress(), status: 'completed' as const, stopReason: 'more' as const, batchStatus: 'complete' as const };
+      if (job.operation === 'resolve') {
+        account = await getConnector('qoj').resolveAccount(job.target, ctx); await onAccount?.(account);
+        return { ...progress(), status: 'completed' as const, stopReason: 'more' as const, batchStatus: 'complete' as const };
+      }
+      const result = await collectQojSubmissionPages({ handle: job.target, mode: job.mode, maxPages: job.maxPages, maxDurationMs: Math.max(1, job.maxDurationMs - (Date.now() - started)), cursor, checkpoint, range: job.range }, ctx, async page => {
         signal.throwIfAborted();
         await onPage(page);
         pages++;
@@ -148,7 +154,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
           seen.add(row.externalSubmissionId);
           verdicts[row.verdict] = (verdicts[row.verdict] ?? 0) + 1;
         }
-      });
+      }, async resolved => { account = resolved; await onAccount?.(resolved); });
       account = result.account;
       return { ...progress(), status: budget.aborted && !taskSignal.aborted && !lifetimeSignal.aborted ? 'timeout' : result.batchStatus === 'cancelled' ? 'cancelled' : result.batchStatus === 'budget_exhausted' ? 'timeout' : 'completed', stopReason: result.stopReason, batchStatus: result.batchStatus, historyComplete: result.stopReason === 'history_end' };
     } catch (error) {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createBoss, enqueueReadRun, ensureCollectionConnection, getReadRun, listRecoverableRuns, listUnsettledRuns, markInterruptedRun, PLATFORM_READ_QUEUES, type ReadQueueClient as PgBoss } from '@acm/db/server';
+import { createBoss, enqueueReadRun, ensureCollectionConnection, getReadRun, listRecoverableRuns, listUnsettledRuns, markInterruptedRun, PLATFORM_READ_QUEUES, QOJ_SESSION_QUEUE, type ReadQueueClient as PgBoss } from '@acm/db/server';
 import { ConnectorError, type PlatformId } from '@acm/connectors/contracts';
 import { originalRetryInput, parsePlatformReadRequest } from './contracts';
 
@@ -18,7 +18,7 @@ export async function withReadQueue<T>(handler: (boss: PgBoss) => Promise<T>): P
 export async function requestPlatformRead(input: unknown, options: { actorId?: string; boss?: PgBoss; retryOf?: string; recoveryGeneration?: number } = {}) {
   const request = parsePlatformReadRequest(input);
   if (request.platform === 'qoj' && request.connectionId !== (process.env.QOJ_CONNECTION_ID ?? 'qoj-lab')) throw new ConnectorError('INVALID_INPUT', '正式 QOJ 队列只使用配置的专用连接');
-  const enqueue = (boss: PgBoss) => enqueueReadRun(boss, { platform: request.platform, connectionId: request.connectionId ?? null, input: request, queue: PLATFORM_READ_QUEUES[request.platform], requestKey: readRequestKey(request), ...options });
+  const enqueue = (boss: PgBoss) => enqueueReadRun(boss, { platform: request.platform, connectionId: request.connectionId ?? null, input: request, queue: request.operation === 'verify_session' && request.platform === 'qoj' ? QOJ_SESSION_QUEUE : PLATFORM_READ_QUEUES[request.platform], requestKey: readRequestKey(request), ...options });
   return options.boss ? enqueue(options.boss) : withReadQueue(enqueue);
 }
 export async function retryPlatformRead(id: string, actorId?: string, boss?: PgBoss, recoveryGeneration?: number) {

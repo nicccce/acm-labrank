@@ -5,11 +5,11 @@ export { ConnectorError } from '@acm/connectors/contracts';
 export type { ConnectorCheckpoint, ConnectorCursor } from '@acm/connectors/contracts';
 export { createQojMemoryStore } from './memory-store';
 
-export async function collectQojSubmissionPages(input: { handle: string; mode: 'backfill' | 'incremental'; cursor?: ConnectorCursor | null; checkpoint?: ConnectorCheckpoint | null; maxPages: number; maxDurationMs?: number }, ctx: RequestContext, commitPage: (page: SubmissionPage) => Promise<void>) {
+export async function collectQojSubmissionPages(input: { handle: string; mode: 'backfill' | 'incremental'; cursor?: ConnectorCursor | null; checkpoint?: ConnectorCheckpoint | null; range?: import('@acm/connectors/contracts').SubmissionRange; maxPages: number; maxDurationMs?: number }, ctx: RequestContext, commitPage: (page: SubmissionPage) => Promise<void>, onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>) {
   let coverage: SubmissionPage['coverage'] = 'visible';
   const result = await readAccount({ ...input, platform: 'qoj' }, ctx, async page => {
     await commitPage(page);
     coverage = page.coverage;
-  });
+  }, onAccount);
   return { ...result, nextCheckpoint: result.stopReason === 'more' ? null : result.checkpoint, coverage };
 }

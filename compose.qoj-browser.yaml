@@ -1,6 +1,22 @@
 # Opt-in container-owned Chromium desktop; never mounts a host browser profile.
 # docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build worker
 services:
+  qoj-relay:
+    image: acm-leaderboard:qoj-browser
+    entrypoint: ["node", "scripts/qoj-connect-proxy.mjs"]
+    restart: unless-stopped
+    init: true
+    environment:
+      QOJ_RELAY_PORT: "3875"
+      QOJ_RELAY_UPSTREAM: ${QOJ_RELAY_UPSTREAM:-}
+    volumes:
+      - ./scripts/qoj-connect-proxy.mjs:/app/scripts/qoj-connect-proxy.mjs:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+
   worker:
     image: acm-leaderboard:qoj-browser
     build:
@@ -10,15 +26,15 @@ services:
       QOJ_CONNECTION_ID: ${QOJ_CONNECTION_ID:-qoj-lab}
       QOJ_BROWSER_EXECUTABLE: /usr/bin/chromium
       QOJ_BROWSER_HEADED: "true"
-      QOJ_BROWSER_MANUAL_START: ${QOJ_BROWSER_MANUAL_START:-false}
+      QOJ_BROWSER_MANUAL_START: "false"
+      QOJ_HUMAN_RETRIES: "0"
       QOJ_BROWSER_START_TARGET: ${QOJ_BROWSER_START_TARGET:-muhammad}
       # qoj-container.mjs launches Chromium and injects a loopback-only CDP endpoint into Worker.
-      QOJ_BROWSER_PROXY_SERVER: ${QOJ_BROWSER_PROXY_SERVER:-}
+      QOJ_BROWSER_PROXY_SERVER: ${QOJ_BROWSER_PROXY_SERVER:-http://qoj-relay:3875}
       QOJ_MIN_INTERVAL_MS: ${QOJ_MIN_INTERVAL_MS:-3000}
       QOJ_HTTP_TIMEOUT_MS: ${QOJ_HTTP_TIMEOUT_MS:-30000}
       QOJ_HTTP_RETRIES: ${QOJ_HTTP_RETRIES:-2}
       QOJ_HUMAN_TIMEOUT_MS: ${QOJ_HUMAN_TIMEOUT_MS:-120000}
-      QOJ_HUMAN_RETRIES: ${QOJ_HUMAN_RETRIES:-2}
       QOJ_HUMAN_CONFIRM_FILE: /app/.local/qoj-confirm.json
       QOJ_VNC_PASSWORD_FILE: /run/secrets/qoj_vnc_password
     secrets:
@@ -33,6 +49,8 @@ services:
       - /app/apps/worker/.local:rw,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700
     cap_drop:
       - ALL
+    depends_on:
+      qoj-relay: { condition: service_started }
 
 secrets:
   qoj_vnc_password:

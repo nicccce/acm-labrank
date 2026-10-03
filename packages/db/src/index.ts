@@ -7,3 +7,6 @@ export * from './collection/connector-sessions';
 export * from './collection/policies';
 export * from './collection/connections';
 export * from './collection/runs';
+export * from './collection/login-attempts';
+export * from './personal';
+export * from './personal-queries';

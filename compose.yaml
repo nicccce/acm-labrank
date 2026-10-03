@@ -18,7 +18,12 @@ x-app: &app
     LUOGU_MIN_INTERVAL_MS: ${LUOGU_MIN_INTERVAL_MS:-3000}
     QOJ_CONNECTION_ID: ${QOJ_CONNECTION_ID:-qoj-lab}
     LUOGU_CONNECTION_ID: ${LUOGU_CONNECTION_ID:-luogu-lab}
+    QOJ_VNC_URL: ${QOJ_VNC_URL:-http://localhost:6080/vnc.html?autoconnect=1&resize=scale}
     SESSION_ENCRYPTION_KEY_FILE: /run/secrets/session_encryption_key
+    NODE_USE_ENV_PROXY: ${NODE_USE_ENV_PROXY:-0}
+    HTTPS_PROXY: ${PLATFORM_HTTPS_PROXY:-}
+    HTTP_PROXY: ${PLATFORM_HTTPS_PROXY:-}
+    NO_PROXY: localhost,127.0.0.1,::1,web,worker,db,qoj-relay
   logging:
     driver: json-file
     options:
@@ -82,6 +87,16 @@ services:
       start_period: 20s
       retries: 3
 
+  seed:
+    <<: *app
+    profiles: ["tools"]
+    command: ["pnpm", "members:seed"]
+    environment:
+      <<: *app-env
+      MEMBER_TEST_PASSWORD_FILE: /run/secrets/member_test_password
+    secrets:
+      - member_test_password
+
   worker:
     <<: *app
     command: ["pnpm", "--filter", "@acm/worker", "start"]
@@ -105,3 +120,5 @@ secrets:
     file: ${SESSION_ENCRYPTION_KEY_FILE:-./.secrets/session-encryption-key}
   admin_bootstrap_password:
     file: ${ADMIN_BOOTSTRAP_PASSWORD_FILE:-./.secrets/admin-bootstrap-password}
+  member_test_password:
+    file: ./.secrets/member-test-password

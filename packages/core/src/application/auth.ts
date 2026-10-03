@@ -52,7 +52,7 @@ export async function register(input: unknown) {
     throw error;
   }
 }
-function userDto(user: { id: string; username: string; realName: string | null; role: 'admin' | 'member' }) {
+function userDto(user: { id: string; username: string; realName: string | null; role: 'admin' | 'member'; verifiedCfHandle?: string | null }) {
   return { id: user.id, username: user.username, realName: user.realName, displayName: displayName(user), role: user.role };
 }
 async function issueSession(user: Parameters<typeof userDto>[0]) {
@@ -64,6 +64,6 @@ async function issueSession(user: Parameters<typeof userDto>[0]) {
 export async function getSession(token: string | undefined) {
   if (!token || !/^[\w-]{43}$/.test(token)) return null;
   const session = await findSession(digest(token), new Date());
-  return session ? { user: userDto(session), expiresAt: session.expiresAt, csrfToken: csrfTokenForSession(token) } : null;
+  return session ? { sessionId: session.sessionId, user: userDto(session), expiresAt: session.expiresAt, csrfToken: csrfTokenForSession(token) } : null;
 }
 export async function logout(token: string) { await revokeSession(digest(token), new Date()); }

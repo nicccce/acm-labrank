@@ -19,6 +19,7 @@ export async function findSession(tokenHash: string, now: Date) {
     username: users.username,
     realName: users.realName,
     role: users.role,
+    verifiedCfHandle: sql<string | null>`(SELECT a.handle FROM platform_bindings b JOIN platform_accounts a ON a.id=b.account_id WHERE b.user_id=${users.id} AND b.platform='codeforces')`,
   }).from(sessions).innerJoin(users, eq(users.id, sessions.userId)).where(and(
     eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt), gt(sessions.expiresAt, now), eq(users.active, true),
   )).limit(1);

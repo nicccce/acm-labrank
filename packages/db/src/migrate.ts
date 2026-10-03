@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { closeDb, getDb, getPool } from './client';
-import { createBoss, PROBE_QUEUE, PLATFORM_READ_QUEUES } from './queue';
+import { createBoss, PROBE_QUEUE, PLATFORM_READ_QUEUES, PERSONAL_QUEUES, QOJ_SESSION_QUEUE } from './queue';
 import { initializePlatformPolicies } from './collection/policies';
 
 const lock = await getPool().connect();
@@ -19,7 +19,8 @@ try {
   await boss.start();
   await boss.createQueue(PROBE_QUEUE, { policy: 'exclusive', retryLimit: 2, retryDelay: 5, expireInSeconds: 60 });
   // Bounded reads with business outcomes; challenges must not become endless queue retries.
-  for (const queue of Object.values(PLATFORM_READ_QUEUES)) {
+  await getPool().query('INSERT INTO collection_control(id) VALUES (1) ON CONFLICT DO NOTHING');
+  for (const queue of [...Object.values(PLATFORM_READ_QUEUES), ...Object.values(PERSONAL_QUEUES), QOJ_SESSION_QUEUE]) {
     await boss.createQueue(queue, { policy: 'exclusive', retryLimit: 0, expireInSeconds: 960, heartbeatSeconds: 30 });
     await boss.updateQueue(queue, { retryLimit: 0, expireInSeconds: 960, heartbeatSeconds: 30 });
   }

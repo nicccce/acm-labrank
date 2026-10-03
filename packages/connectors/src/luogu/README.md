@@ -33,11 +33,11 @@ HTML script#lentille-context: template="user.show", data.user.uid/name
 3. `GET /auth/login-methods?login={登录标识}`；本次响应 `{available:["password"],default:"password"}`。登录标识与目标数据用户名独立。
 4. `GET /lg4/captcha?_t={毫秒}`，同一 jar 取得当前图片。展示实际图片等待人工输入；刷新将旧 state 标为 consumed 并递增 version。旧版本、不同会话、过期挑战不能提交。
 5. 当前官方 PasswordAuthenticator 构造 JSON `{username,password,captcha}`，实际前端指定 `POST /do-auth/password`，带 `Content-Type: application/json`、`X-CSRF-TOKEN`，同一 Cookie、Origin/Referer。本轮人工验证码已通过该流程成功登录。
-6. 登录适配器要求 `redirectTo`，再 `GET /` 从顶层 `user.uid/name` 核对指定采集身份；执行目标解析及两页读取，成功才发布正式 Cookie。登录适配器与读取适配器分开。
+6. 登录适配器要求 `redirectTo`，再 `GET /` 从顶层 `user.uid/name` 核对采集身份并发布正式 Cookie；此步骤不读取提交列表，读取权限由之后的显式采集验证。
 
 密码、验证码文本仅在当前进程调用使用，完成后清空输入引用；不写文件、数据库、队列或日志。临时 jar 在内存；正式 jar 使用 `SESSION_ENCRYPTION_KEY_FILE` 的独立 32 字节 hex Secret 作 AES-256-GCM 加密。envelope 有 version/keyId/nonce/tag/ciphertext，AAD 绑定洛谷与 connection ID，保存在 PostgreSQL `connector_sessions.encrypted_session`。取得请求租约后读最新 jar，释放前保存轮换 Cookie；Cookie/Set-Cookie 不向 CLI 输出。
 
-图片是短时挑战文件，刷新覆盖，结束/取消/超时清理；尝试 10 分钟有效。当前实现 Worker/应用登录入口，已实现连接 generation 与 Cookie 修订保护；完整管理员登录页面、会话绑定的持久化 login attempt 和断开接口仍待实现。二次认证或原域风控需要人工处理；不能自动解验证码。
+Web 登录将临时 Cookie/CSRF/state 加密保存，挑战图片短期保存，尝试与创建者本站会话绑定；刷新递增版本，取消、终态和过期清理。发布时再次检查会话、尝试状态和连接 generation。管理员页面、持久化尝试和断开接口已接通；新 Web 流程的真实登录/读取待人工验收。二次认证或原域风控需要人工处理。
 
 ## 提交、难度与时间依据
 

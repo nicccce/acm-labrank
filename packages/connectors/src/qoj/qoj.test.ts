@@ -38,6 +38,14 @@ describe('QOJ observed HTML parser', () => {
   });
 });
 describe('QOJ connector scanning and login', () => {
+  it('bounds a first scan at a date even when pagination advertises another page', async () => {
+    const ctx = context(fixture('normal'));
+    const result = await qojConnector.fetchSubmissionPage(account, { mode: 'backfill', cursor: null, checkpoint: null, range: { from: '2026-10-01T10:10:00.000Z', to: '2026-10-01T10:12:22.000Z' } }, ctx);
+    expect(result).toMatchObject({ stopReason: 'range_start', nextCursor: null, nextCheckpoint: { data: { headId: '9000003' } } });
+    expect(result.submissions.map(row => row.externalSubmissionId)).toEqual(['9000003']);
+    expect(ctx.request).toHaveBeenCalledTimes(1);
+  });
+
   it('overlaps pages, preserves continuation and checkpoints only after completion', async () => {
     const ctx = context(fixture('normal'));
     const first = await qojConnector.fetchSubmissionPage(account, { mode: 'backfill', cursor: null, checkpoint: null }, ctx);

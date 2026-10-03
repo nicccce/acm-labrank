@@ -23,13 +23,13 @@ export function decryptLuoguSession(value: string, key: Buffer, id: string) {
 }
 
 /** Every jar read/update happens inside the application's shared platform lease. */
-export async function createLuoguRequestContext(options: { connectionId: string; signal: AbortSignal; temporary?: boolean; fetchImpl?: typeof fetch; expectedGeneration?: number }) {
+export async function createLuoguRequestContext(options: { connectionId: string; signal: AbortSignal; temporary?: boolean; initialJar?: string; fetchImpl?: typeof fetch; expectedGeneration?: number }) {
   const generation = options.expectedGeneration ?? (await ensureCollectionConnection(options.connectionId, 'luogu')).generation;
   const file = process.env.SESSION_ENCRYPTION_KEY_FILE;
   if (!file) throw new Error('SESSION_ENCRYPTION_KEY_FILE_REQUIRED');
   const key = Buffer.from((await readFile(file, 'utf8')).trim(), 'hex');
   if (key.length !== 32) throw new Error('INVALID_SESSION_ENCRYPTION_KEY');
-  let jar = new CookieJar();
+  let jar = options.initialJar ? CookieJar.deserializeSync(options.initialJar) : new CookieJar();
   // The private marker also binds captcha state to this request context.
   const marker = Object.freeze({ connectionId: options.connectionId });
   const ctx = createRequestContext({ platform: 'luogu', signal: options.signal, allowedMethods: ['GET', 'POST'], allowImages: true,
@@ -56,19 +56,20 @@ export async function createLuoguRequestContext(options: { connectionId: string;
   ctx.session = marker;
   return {
     ctx,
-    /** Promotion is a separate application decision after identity AND reading permission. */
-    async promote(expectedUid: string) {
+    exportJar: async () => JSON.stringify(await jar.serialize()),
+    /** Promotion happens only after authenticated identity verification. Reading permission is separate. */
+    async promote(expectedUid: string, attempt?: { id: string; version: number; sessionId: string }) {
       if (!options.temporary) throw new Error('ONLY_TEMPORARY_SESSION_CAN_BE_PROMOTED');
       // Trigger a final leased request and save before releasing that lease.
-      const publishing = createRequestContext({ platform: 'luogu', signal: options.signal, maxResponseBytes: 4 * 1024 * 1024,
+      const publishing = createRequestContext({ platform: 'luogu', signal: options.signal, maxResponseBytes: 4 * 1024 * 1024, fetchImpl: options.fetchImpl,
         sessionHooks: {
-          async beforeRequest(_token, url, init) { const headers = new Headers(init.headers); headers.set('Cookie', await jar.getCookieString(url.href)); return { ...init, headers }; },
+          async beforeRequest(_token, url, init) { const headers = new Headers(init.headers); headers.set('User-Agent', 'acm-labrank/1.0'); headers.set('Accept-Language', 'zh-CN,zh;q=0.9'); headers.set('Cookie', await jar.getCookieString(url.href)); return { ...init, headers }; },
           async afterResponse(token, url, response) {
             const singleResponseContext = { ...ctx, request: async () => response.clone() };
             const identity = await luoguLogin.verifySession(singleResponseContext);
             if (identity.uid !== expectedUid) throw new ConnectorError('AUTH_REQUIRED', '发布前登录身份发生变化');
             for (const cookie of response.headers.getSetCookie()) await jar.setCookie(cookie, url.href);
-            await saveConnectorSession(options.connectionId, 'luogu', encryptLuoguSession(JSON.stringify(await jar.serialize()), key, options.connectionId), token, options.signal, generation, { collector: expectedUid });
+            await saveConnectorSession(options.connectionId, 'luogu', encryptLuoguSession(JSON.stringify(await jar.serialize()), key, options.connectionId), token, options.signal, generation, { collector: expectedUid, attempt });
           },
         },
       });

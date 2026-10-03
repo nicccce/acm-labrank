@@ -1,10 +1,11 @@
 # ACM 实验室榜单
 
-pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzle 和 pg-boss。已实现本地认证、管理员引导，以及 Codeforces、洛谷、QOJ 的个人提交读取、独立限流、失败记录和鉴权后恢复。账号绑定、提交事实入库、积分榜、队伍与周期同步仍按[项目设计](docs/项目设计.md)实施。
+pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzle 和 pg-boss。已实现本地认证、Web 洛谷验证码登录、内嵌 QOJ noVNC、三平台个人绑定、按需同步、提交事实入库及个人榜/明细 API。2026-10-03 已在管理员完成登录后验证三平台真实分页、正式入库及自动续跑；回填完成前查询返回暂定标记。队伍、周期同步和榜单展示页面后续实施。
 
 ## 文档入口
 
 - [文档索引](docs/README.md)：当前维护文档与历史记录。
+- [个人后端与 Web 登录](docs/个人后端与Web登录.md)：本轮 API、管理员交接、采集开关和离线集成验证。
 - [采集架构与管理 API](docs/采集架构与管理API.md)：公共契约、数据库限流、连接状态、错误处理与部署。
 - [QOJ 运行手册](docs/QOJ采集流程与技术维护.md)：专用浏览器、人工登录、接管与故障处理。
 - 连接器规则：[Codeforces](packages/connectors/src/codeforces/README.md)、[洛谷](packages/connectors/src/luogu/README.md)、[QOJ](packages/connectors/src/qoj/README.md)。
@@ -20,6 +21,8 @@ docker compose ps
 ```
 
 默认访问 <http://localhost:3000>。管理员用户名在本地 `.env`，初始密码在受保护的 `.secrets/admin-bootstrap-password`。初始化重复运行保留既有配置；已有管理员时引导跳过。正式部署把 `APP_URL` 配为实际 HTTPS 地址。
+
+本地登录测试使用 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build`，打开 <http://localhost:3000/admin/connections>。初次迁移暂停提交采集，管理员先完成洛谷表单登录及 QOJ 桌面登录/身份核验，再启用采集。`docker compose run --rm --no-deps seed` 创建测试成员及待验证候选；测试密码见 `.secrets/member-test-password`。
 
 默认仅发布宿主回环 Web 端口，数据库不发布。QOJ 专用浏览器使用可选 `compose.qoj-browser.yaml`，启动与人工登录见运行手册。网络受限时可向构建传入 `NPM_REGISTRY` 指向可信 HTTPS npm 源；本机历史排障不作为新环境启动前提。
 
@@ -53,7 +56,7 @@ docs/                            当前文档，archive/ 为历史记录
 
 依赖方向为 `apps → core/application → db、connectors`。连接器不写库，领域规则不访问数据库或网络。客户端仅导入 `@acm/core/domain`、`@acm/connectors/contracts` 或 `metadata`；服务端使用共享包公开入口，ESLint 检查依赖边界。
 
-当前表包含认证、心跳、共享请求配额、加密会话、限流策略、连接状态、读取运行和管理审计。运行记录保存诊断进度及摘要；它不代替正式提交事实和业务同步游标。
+当前表包含认证、共享配额、加密会话与登录尝试、平台身份/绑定、题目/提交/归属及同步游标/运行。原有读取运行仍保存诊断摘要；正式个人同步按页事务保存事实及业务游标。
 
 ## 本地开发与检查
 
@@ -80,6 +83,8 @@ pnpm dev
 | `pnpm db:migrate` | 业务迁移、队列 schema 与策略初始化 |
 | `pnpm queue:probe` | 真实数据库下的基础队列验证 |
 | `pnpm collection:probe` | 独立测试库下的采集集成验证；限制见采集文档 |
+| `pnpm personal:verify` | 自动创建独立测试库，以本地样本验证个人事实、榜单、队列与持久化登录 |
+| `pnpm members:seed` | 幂等创建测试成员及三平台候选，不重置已有密码 |
 | `pnpm verify:smoke` | HTTP 验证，会创建临时 member |
 
 ## 平台读取
@@ -94,7 +99,7 @@ pnpm qoj:debug --target muhammad --pages 2 --enqueue
 
 各平台配额由 PostgreSQL 共享，数据库策略支持调整间隔范围；环境间隔只在迁移时初始化缺失策略。失败运行可从管理 API 查询、重试；洛谷/QOJ 重新核验连接后，worker 扫描并恢复待鉴权任务。
 
-洛谷使用现有 CLI 完成人工验证码登录；QOJ 通过专用浏览器/noVNC 登录。密码、验证码及 Cookie 不进入任务参数或运行摘要。QOJ CDP 模式沿用常驻浏览器会话，不自动导入数据库 Cookie。
+洛谷可在管理员 Web 页完成人工验证码登录，QOJ 通过页面内的专用浏览器/noVNC 登录。密码、验证码及 Cookie 不进入任务参数或运行摘要。QOJ CDP 模式沿用常驻浏览器会话，不自动导入数据库 Cookie。CLI 登录现仅核验身份并保存会话，不自动读取提交。
 
 ## 认证与部署
 

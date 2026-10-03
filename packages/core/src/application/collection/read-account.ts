@@ -8,6 +8,7 @@ export interface ReadAccountOptions {
   cursor?: ConnectorCursor | null;
   checkpoint?: ConnectorCheckpoint | null;
   pageSize?: number;
+  range?: import('@acm/connectors/contracts').SubmissionRange;
   maxPages?: number;
   maxDurationMs?: number;
   withProfile?: boolean;
@@ -36,7 +37,7 @@ export class AccountReadError extends ConnectorError {
 }
 
 /** A read-only batch. onPage is the future transaction boundary for a persistence use case. */
-export async function readAccount(options: ReadAccountOptions, ctx: RequestContext, onPage?: (page: SubmissionPage) => Promise<void>): Promise<AccountReadResult> {
+export async function readAccount(options: ReadAccountOptions, ctx: RequestContext, onPage?: (page: SubmissionPage) => Promise<void>, onAccount?: (account: AccountRef) => Promise<void>): Promise<AccountReadResult> {
   const maxPages = options.maxPages ?? 3;
   const maxDurationMs = options.maxDurationMs ?? 120000;
   if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 1000 || !Number.isInteger(maxDurationMs) || maxDurationMs < 1) {
@@ -51,6 +52,7 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
   };
   const connector = getConnector(options.platform);
   const account = await connector.resolveAccount(options.handle, batchCtx);
+  await onAccount?.(account);
   const result: AccountReadResult = {
     account, pages: 0, rawRecordCount: 0, submissions: [], problems: [], cursor: options.cursor ?? null,
     checkpoint: options.checkpoint ?? null, stopReason: 'more', batchStatus: 'page_limit',
@@ -61,7 +63,7 @@ export async function readAccount(options: ReadAccountOptions, ctx: RequestConte
     while (result.pages < maxPages) {
       if (Date.now() >= deadline) { result.batchStatus = 'budget_exhausted'; break; }
       signal.throwIfAborted();
-      const scan = { mode: options.mode, cursor: result.cursor, checkpoint: options.checkpoint ?? null, pageSize: options.pageSize };
+      const scan = { mode: options.mode, cursor: result.cursor, checkpoint: options.checkpoint ?? null, pageSize: options.pageSize, range: options.range };
       const page = options.contestId
         ? await (connector.fetchContestSubmissionPage ?? unsupported)(account, options.contestId, scan, batchCtx)
         : await connector.fetchSubmissionPage(account, scan, batchCtx);

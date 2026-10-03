@@ -36,6 +36,15 @@ describe('Luogu account lookup', () => {
 });
 
 describe('Luogu raw submissions', () => {
+  it('cuts a first scan at the requested start and verifies the head without reading older pages', async () => {
+    const context = pagesContext();
+    const result = await fetchSubmissionPage(account, { mode: 'backfill', cursor: null, checkpoint: null, range: { from: '2026-05-21T08:20:45.000Z', to: '2026-05-22T00:00:00.000Z' } }, context);
+    expect(result).toMatchObject({ stopReason: 'range_start', nextCursor: null, nextCheckpoint: { data: { head: '105' } } });
+    expect(result.submissions.map(row => row.externalSubmissionId)).toEqual(['105']);
+    expect(result.problems.map(row => row.problemKey)).toEqual(['P1097']);
+    expect(context.request).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves native status/score, author and source; maps seconds to UTC without offset guesses', () => {
     const result = normalizeRecords(fixture.data.records, '900002', '2026-10-01T10:00:00.000Z');
     expect(result.submissions[0]).toMatchObject({ externalSubmissionId: '105', verdict: 'accepted', nativeScore: 100, nativeStatus: 12,
@@ -91,6 +100,53 @@ describe('Luogu raw submissions', () => {
 });
 
 describe('Luogu error pages and login challenges', () => {
+  const password = 'fixture-private-password', captcha = 'fixture-private-captcha';
+  async function submitResponse(response: Response, user: { uid: number; name: string } | null = { uid: 900001, name: 'collector_fixture' }) {
+    const request = vi.fn(async (url: URL, init?: RequestInit) => {
+      if (url.pathname === '/do-auth/password') {
+        expect(new Headers(init?.headers).get('accept')).toBe('application/json');
+        expect(new Headers(init?.headers).get('x-csrf-token')).toBe('fixture-csrf');
+        expect(JSON.parse(String(init?.body))).toEqual({ username: 'collector_fixture', password, captcha });
+        return response;
+      }
+      expect(url.pathname).toBe('/');
+      return new Response(html({ template: 'home', status: 200, data: {}, user }));
+    });
+    const context = ctx(request);
+    const credentials = { version: 1, password, captcha };
+    const result = luoguLogin.advanceLogin({ attemptId: 'fixture', version: 1, username: 'collector_fixture', csrf: 'fixture-csrf', expiresAt: Date.now() + 60000, consumed: false, sessionBinding: context.session }, credentials, context);
+    try { return await result; }
+    finally { expect(credentials.password).toBe(''); expect(credentials.captcha).toBe(''); }
+  }
+  it.each([
+    [400, { errorType: 'CaptchaNotValidException', errorMessage: `Invalid captcha ${captcha}` }, 'LOGIN_FAILED', '图形验证码'],
+    [400, { errorType: 'BadCredentialsException', errorMessage: `Wrong password ${password}` }, 'LOGIN_FAILED', '账号或密码'],
+    [400, { errorType: 'InvalidCsrfTokenException' }, 'STALE_CHALLENGE', '校验令牌'],
+    [400, { errorType: 'TwoFactorRequiredException' }, 'UNSUPPORTED_FLOW', '两步验证'],
+    [400, { errorType: 'RequestFormError', errorData: { fields: [{ message: `验证码错误 ${captcha}` }] } }, 'LOGIN_FAILED', '图形验证码'],
+    [403, { errorMessage: `unknown rejection ${password}` }, 'FORBIDDEN', 'HTTP 403'],
+    [429, {}, 'RATE_LIMITED', '登录频率'],
+    [503, {}, 'TEMP_UNAVAILABLE', '暂不可用'],
+    [400, { errorMessage: `unknown rejection ${password}` }, 'LOGIN_FAILED', '未识别'],
+  ])('classifies HTTP %s login failures without exposing platform echoes', async (status, body, code, explanation) => {
+    const result = submitResponse(new Response(JSON.stringify(body), { status: Number(status), headers: { 'content-type': 'application/json' } }));
+    await expect(result).rejects.toMatchObject({ code, httpStatus: status, message: expect.stringContaining(String(explanation)) });
+    await expect(result).rejects.not.toHaveProperty('message', expect.stringContaining(password));
+    await expect(result).rejects.not.toHaveProperty('message', expect.stringContaining(captcha));
+  });
+  it('uses authenticated identity for successful JSON responses with or without redirectTo', async () => {
+    for (const body of [{ redirectTo: '/' }, { success: true }]) {
+      expect(await submitResponse(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }))).toEqual({ uid: '900001', name: 'collector_fixture' });
+    }
+  });
+  it('refuses a nominally successful response without an authenticated identity', async () => {
+    await expect(submitResponse(new Response('{"success":true}'), null)).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+  });
+  it('distinguishes HTML security challenges and malformed success responses from bad credentials', async () => {
+    await expect(submitResponse(new Response('<title>Just a moment...</title><div id="cf-chl"></div>', { status: 403 }))).rejects.toMatchObject({ code: 'RISK_CONTROL' });
+    await expect(submitResponse(new Response('<title>Changed response</title>'))).rejects.toMatchObject({ code: 'PARSE_CHANGED' });
+    await expect(submitResponse(new Response('[]'))).rejects.toMatchObject({ code: 'PARSE_CHANGED' });
+  });
   it.each([
     [html({ template: 'login', status: 200, data: {}, user: null }), 'AUTH_REQUIRED'],
     [html({ template: 'error', status: 403, data: { errorType: 'PrivacyException', errorMessage: '隐私保护' } }), 'PRIVACY_RESTRICTED'],

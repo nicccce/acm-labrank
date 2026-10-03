@@ -103,7 +103,7 @@ try {
   const manualStart = process.env.QOJ_BROWSER_MANUAL_START === 'true';
   const target = process.env.QOJ_BROWSER_START_TARGET ?? 'muhammad';
   if (manualStart && (!target || target.length > 100 || /[\s/?#\\]/.test(target))) throw new Error('INVALID_BROWSER_START_TARGET');
-  browserArguments.push(manualStart ? `https://qoj.ac/user/profile/${encodeURIComponent(target)}` : 'about:blank');
+  browserArguments.push(manualStart ? `https://qoj.ac/user/profile/${encodeURIComponent(target)}` : 'https://qoj.ac/login');
   start('browser', process.env.QOJ_BROWSER_EXECUTABLE ?? '/usr/bin/chromium', browserArguments);
   let browserReady = false;
   for (let attempt = 0; attempt < 100 && !stopping; attempt++) {

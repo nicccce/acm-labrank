@@ -1,7 +1,7 @@
-import { closeDb, createBoss, PROBE_QUEUE, writeWorkerHeartbeat, getPool, checkDatabaseReady, cleanCollectionHistory } from '@acm/db/server';
+import { closeDb, createBoss, PROBE_QUEUE, writeWorkerHeartbeat, getPool, checkDatabaseReady, cleanCollectionHistory, getCollectionControl, expireLoginAttempts, maintainPersonalRuns, PLATFORM_READ_QUEUES, PERSONAL_QUEUES } from '@acm/db/server';
 import { createQojReadWorker, getConfig, maintainReadQueue } from '@acm/core/server';
 import { qojHumanInput } from '../cli/qoj-human';
-import { registerPlatformQueues } from './queues';
+import { registerPlatformQueues, registerPersonalQueues, registerSessionQueue } from './queues';
 
 const config = getConfig();
 const boss = createBoss();
@@ -16,6 +16,19 @@ let heartbeat: ReturnType<typeof setInterval> | undefined;
 let stopping = false;
 let maintenanceRunning = false;
 let maintenanceTicks = 0;
+let collectionRegistered = false;
+async function maintainCollection() {
+  const enabled = (await getCollectionControl()).enabled;
+  if (enabled && !collectionRegistered) {
+    await registerPlatformQueues(boss, { qoj, signal: controller.signal }, config.QOJ_CONNECTION_ID);
+    await registerPersonalQueues(boss, { qoj, signal: controller.signal }); collectionRegistered = true;
+  } else if (!enabled && collectionRegistered) {
+    for (const queue of [...Object.values(PLATFORM_READ_QUEUES), ...Object.values(PERSONAL_QUEUES)]) await boss.offWork(queue, { wait: false });
+    collectionRegistered = false;
+  }
+  await expireLoginAttempts();
+  if (enabled) { await maintainReadQueue(boss); await maintainPersonalRuns(boss); }
+}
 async function shutdown(code = 0) {
   if (stopping) return;
   stopping = true;
@@ -36,8 +49,8 @@ try {
       console.log(JSON.stringify({ event: 'queue_probe_processed', jobId: job.id }));
     }
   });
-  await registerPlatformQueues(boss, { qoj, signal: controller.signal }, config.QOJ_CONNECTION_ID);
-  await maintainReadQueue(boss);
+  await registerSessionQueue(boss, { qoj, signal: controller.signal });
+  await maintainCollection();
   await writeWorkerHeartbeat();
   heartbeat = setInterval(() => {
     void writeWorkerHeartbeat().catch(() => {
@@ -46,7 +59,7 @@ try {
     });
     if (!maintenanceRunning) {
       maintenanceRunning = true;
-      void maintainReadQueue(boss).then(async () => { if (++maintenanceTicks % 240 === 0) await cleanCollectionHistory(); })
+      void maintainCollection().then(async () => { if (++maintenanceTicks % 240 === 0) await cleanCollectionHistory(); })
         .catch(() => console.error(JSON.stringify({ code: 'READ_MAINTENANCE_FAILED' }))).finally(() => { maintenanceRunning = false; });
     }
   }, 15000);

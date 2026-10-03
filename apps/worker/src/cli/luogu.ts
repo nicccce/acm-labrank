@@ -18,16 +18,6 @@ const controller = new AbortController();
 process.once('SIGINT', () => controller.abort());
 process.once('SIGTERM', () => controller.abort());
 type Result = Awaited<ReturnType<typeof collectLuogu>>;
-function summary(result: Result) {
-  return { event: 'luogu_collection', target: { handle: result.account.handle, uid: result.account.externalId },
-    collectorVerified: true, pages: result.pages, uniqueSubmissions: result.submissions.length, uniqueProblems: result.problems.length,
-    verdicts: Object.fromEntries(['accepted', 'rejected', 'pending', 'unknown'].map(v => [v, result.submissions.filter(s => s.verdict === v).length])),
-    nativeStatuses: [...new Set(result.submissions.map(s => s.nativeStatus))],
-    earliestSubmittedAt: result.submissions.map(s => s.submittedAt).filter(s => s !== null).sort()[0] ?? null,
-    latestSubmittedAt: result.submissions.map(s => s.submittedAt).filter(s => s !== null).sort().at(-1) ?? null,
-    stopReason: result.stopReason, hasMore: result.cursor !== null, coverage: result.coverage,
-    visibleHistoryComplete: result.stopReason === 'history_end', teamEvidence: false, participations: 'none' };
-}
 try {
   const maxPages = Number(values['max-pages']), timeoutMs = Number(values['timeout-ms']);
   if (!values.account || !['backfill', 'incremental'].includes(values.mode) || !Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 100 || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 3600000) throw new Error('INVALID_ARGUMENTS');
@@ -57,7 +47,7 @@ try {
         if (command.action === 'refresh') { await attempt.refresh(command.version); await showChallenge(); continue; }
         if (command.action !== 'login') throw new Error('INVALID_LOGIN_ACTION');
         const result = await attempt.complete(command);
-        console.log(JSON.stringify({ ...summary(result), encryptedSessionSaved: true }));
+        console.log(JSON.stringify({ event: 'luogu_login', identity: result.identity, readingPermission: result.readingPermission, encryptedSessionSaved: true }));
         break;
       }
     } finally { signal.removeEventListener('abort', cancel); input.close(); if (process.stdin.isTTY) process.stdin.setRawMode(false); process.stdin.pause(); await unlink(captchaPath).catch(() => undefined); }

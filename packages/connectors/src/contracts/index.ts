@@ -18,6 +18,7 @@ export interface NormalizedProblem {
   problemKey: string;
   title: string;
   nativeDifficulty: number | null;
+  difficultyObserved?: boolean;
   sourceUrl: string;
   parserVersion?: string;
   observedAt?: string;
@@ -67,6 +68,25 @@ export interface SubmissionScan {
   cursor: ConnectorCursor | null;
   checkpoint: ConnectorCheckpoint | null;
   pageSize?: number;
+  range?: SubmissionRange;
+}
+/** UTC half-open interval; callers convert inclusive Beijing dates before scanning. */
+export interface SubmissionRange { from: string; to: string }
+export function rangeStartReached(submissions: NormalizedSubmission[], range?: SubmissionRange): boolean {
+  if (!range) return false;
+  let previous = Infinity;
+  for (const row of submissions) {
+    const time = row.submittedAt === null ? NaN : Date.parse(row.submittedAt);
+    if (!Number.isFinite(time) || time > previous) throw new ConnectorError('PARSE_CHANGED', 'Cannot safely truncate an unordered or undated submission page');
+    previous = time;
+  }
+  return submissions.some(row => Date.parse(row.submittedAt!) < Date.parse(range.from));
+}
+export function filterSubmissionRange(page: SubmissionPage, range?: SubmissionRange): SubmissionPage {
+  if (!range) return page;
+  const submissions = page.submissions.filter(row => row.submittedAt !== null && Date.parse(row.submittedAt) >= Date.parse(range.from) && Date.parse(row.submittedAt) < Date.parse(range.to));
+  const keys = new Set(submissions.map(row => row.problemKey));
+  return { ...page, submissions, problems: page.problems.filter(problem => keys.has(problem.problemKey)) };
 }
 export interface Profile {
   account: AccountRef;
@@ -121,7 +141,7 @@ export interface SubmissionPage {
   submissions: NormalizedSubmission[];
   problems: NormalizedProblem[];
   nextCursor: ConnectorCursor | null;
-  stopReason: 'more' | 'history_end' | 'checkpoint_reached';
+  stopReason: 'more' | 'history_end' | 'checkpoint_reached' | 'range_start';
   nextCheckpoint: ConnectorCheckpoint | null;
   coverage: 'visible' | 'restricted';
   sourceUrl: string;

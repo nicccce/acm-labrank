@@ -13,6 +13,28 @@ function context(ids: number[], signal = new AbortController().signal): RequestC
 }
 const options = { platform: 'codeforces' as const, handle: 'ExampleUser', mode: 'backfill' as const, pageSize: 3, maxPages: 2 };
 describe('account read orchestration', () => {
+  it('bounds a first scan, includes the lower boundary, excludes the upper boundary and never requests the next older page', async () => {
+    const ctx = context([10, 9, 8, 7, 6, 5, 4]);
+    const range = { from: new Date((1700000000 + 7) * 1000).toISOString(), to: new Date((1700000000 + 10) * 1000).toISOString() };
+    const first = await readAccount({ ...options, range, maxPages: 1 }, ctx);
+    expect(first.stopReason).toBe('more');
+    expect(first.submissions.map(row => row.externalSubmissionId)).toEqual(['9', '8']);
+    const consume = vi.fn(async () => undefined);
+    const next = await readAccount({ ...options, range, cursor: first.cursor, maxPages: 10 }, ctx, consume);
+    expect(next).toMatchObject({ pages: 1, stopReason: 'range_start', batchStatus: 'complete', cursor: null, checkpoint: { data: { highWaterId: '10' } } });
+    expect(next.submissions.map(row => row.externalSubmissionId)).toEqual(['8', '7']);
+    const offsets = vi.mocked(ctx.request).mock.calls.filter(([url]) => url.pathname.endsWith('user.status')).map(([url]) => url.searchParams.get('from'));
+    expect(offsets).toEqual(['1', '3']);
+    expect(consume).toHaveBeenCalledTimes(1);
+  });
+
+  it('an entirely older first page completes an empty interval immediately', async () => {
+    const ctx = context([10, 9, 8, 7, 6]);
+    const result = await readAccount({ ...options, maxPages: 10, range: { from: '2026-10-01T16:00:00.000Z', to: '2026-10-02T16:00:00.000Z' } }, ctx);
+    expect(result).toMatchObject({ pages: 1, stopReason: 'range_start', submissions: [], problems: [], cursor: null });
+    expect(vi.mocked(ctx.request).mock.calls.filter(([url]) => url.pathname.endsWith('user.status'))).toHaveLength(1);
+  });
+
   it('deduplicates overlaps, returns resumable bounded progress, and finishes from that cursor', async () => {
     const ctx = context([10, 9, 8, 7, 6, 5]);
     const consume = vi.fn(async () => undefined);

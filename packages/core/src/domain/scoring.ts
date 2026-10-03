@@ -1,5 +1,8 @@
 export const CF_BANDS = [[1000, 1], [1200, 2], [1400, 3], [1600, 4], [1800, 5], [2000, 6], [2300, 8], [2600, 10], [2900, 12]] as const;
 export const LUOGU_POINTS = [1, 2, 3, 5, 8, 10, 12, 15] as const;
+export function formatPoints(points: number): string {
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3 }).format(points);
+}
 export function problemPoints(platform: string, difficulty: number | null): number {
   if (difficulty === null || !Number.isFinite(difficulty)) return 3;
   if (platform === 'codeforces') return CF_BANDS.find(([boundary]) => difficulty < boundary)?.[1] ?? 15;

@@ -61,10 +61,12 @@ try {
   checks.push('all-history first AC, rejudging and older observations');
   const team = fixturePage('accepted', '2026-10-02T15:02:00.000Z');
   team.submissions[0]!.externalSubmissionId = '3'; team.submissions[0]!.subjectEvidence = { authorAccountKeys: ['Original', 'Other'], teamId: '11' };
+  team.submissions[0]!.submittedAt = '2026-10-01T16:00:01.000Z';
   version = await commitPersonalPage(run.id, version, team);
-  assert.equal((await getPersonalMember(one.id, query())).submissionCount, 1);
-  assert.equal((await pool.query("SELECT user_id FROM submission_attributions a JOIN submissions s ON s.id=a.submission_id WHERE s.external_submission_id='3'")).rows[0].user_id, null);
-  checks.push('team evidence never becomes personal credit');
+  assert.equal((await getPersonalMember(one.id, query())).submissionCount, 2);
+  assert.equal((await pool.query("SELECT user_id,share_divisor FROM submission_attributions a JOIN submissions s ON s.id=a.submission_id WHERE s.external_submission_id='3'")).rows[0].user_id, one.id);
+  assert.equal((await pool.query("SELECT share_divisor FROM submission_attributions a JOIN submissions s ON s.id=a.submission_id WHERE s.external_submission_id='3'")).rows[0].share_divisor, 2);
+  checks.push('CF team evidence credits bound authors with the full team divisor');
   const partial = fixturePage('unknown', '2026-10-02T15:03:00.000Z'); partial.problems[0]!.nativeDifficulty = null; partial.submissions[0]!.submittedAt = null; delete partial.submissions[0]!.nativeScore;
   version = await commitPersonalPage(run.id, version, partial);
   assert.equal((await getPersonalMember(one.id, query())).points, 6);
@@ -72,9 +74,10 @@ try {
   checks.push('unobserved metadata does not erase known facts');
   const explicitUnknown = fixturePage('unknown', '2026-10-02T15:03:01.000Z'); explicitUnknown.submissions[0]!.nativeVerdict = 'NEW_PLATFORM_STATUS';
   version = await commitPersonalPage(run.id, version, explicitUnknown);
-  assert.equal((await getPersonalMember(one.id, query())).solveCount, 0);
+  assert.equal((await getPersonalMember(one.id, query())).solveCount, 1);
+  assert.equal((await getPersonalMember(one.id, query())).points, 3);
   version = await commitPersonalPage(run.id, version, fixturePage('accepted', '2026-10-02T15:03:02.000Z'));
-  checks.push('explicit unrecognized rejudge removes AC credit');
+  checks.push('explicit unrecognized rejudge removes solo AC credit and falls back to the shared AC');
 
   await finishPersonalBatch(run.id, boss, {});
   const continued = (await getSyncRun(run.id))!;

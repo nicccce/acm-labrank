@@ -1,3 +1,4 @@
+import { formatPoints } from '@acm/core/domain';
 import { platformNames } from '@acm/connectors/metadata';
 import type { CoverageItem } from '@acm/core/contracts';
 import Link from 'next/link';
@@ -9,7 +10,7 @@ export function Pagination({ path, params, page, limit, total }: { path: string;
   return <div className="pagination"><span>共 {total} 条 · 第 {page} 页</span>{page > 1 && <Link href={href(page - 1)}>上一页</Link>}{page * limit < total && <Link href={href(page + 1)}>下一页</Link>}</div>;
 }
 export function ScoreSummary({ points, solveCount, rank, provisional, submissionCount }: { points: number; solveCount: number; rank: number | null; provisional: boolean; submissionCount?: number }) {
-  return <div className="score-summary"><span>排名 <strong>{rank ?? '—'}</strong></span><span>积分 <strong>{points}</strong></span><span>题数 <strong>{solveCount}</strong></span>{submissionCount !== undefined && <span>提交 <strong>{submissionCount}</strong></span>}{provisional && <span className="muted">暂定</span>}</div>;
+  return <div className="score-summary"><span>排名 <strong>{rank ?? '—'}</strong></span><span>积分 <strong>{formatPoints(points)}</strong></span><span>题数 <strong>{solveCount}</strong></span>{submissionCount !== undefined && <span>提交 <strong>{submissionCount}</strong></span>}{provisional && <span className="muted">暂定</span>}</div>;
 }
 
 export function CoverageTable({ items }: { items: CoverageItem[] }) {

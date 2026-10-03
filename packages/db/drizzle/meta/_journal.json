@@ -64,6 +64,13 @@
       "when": 1791020067186,
       "tag": "0008_continuous_incremental",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791046627418,
+      "tag": "0009_cf_shared_credit",
+      "breakpoints": true
     }
   ]
 }

@@ -187,10 +187,12 @@ export const submissions = pgTable('submissions', {
   observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
 }, t => [uniqueIndex('submission_identity').on(t.platform, t.externalSubmissionId), foreignKey({ columns: [t.problemId, t.platform], foreignColumns: [problems.id, problems.platform] }), index('submission_ac_time').on(t.problemId, t.submittedAt).where(sql`${t.verdict}='accepted'`), check('submission_verdict', sql`${t.verdict} IN ('accepted','rejected','pending','unknown')`)]);
 export const submissionAttributions = pgTable('submission_attributions', {
-  submissionId: uuid('submission_id').primaryKey().references(() => submissions.id, { onDelete: 'cascade' }),
+  id: uuid('id').defaultRandom().primaryKey(),
+  submissionId: uuid('submission_id').notNull().references(() => submissions.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').references(() => users.id), accountId: uuid('account_id').references(() => platformAccounts.id),
-  method: text('method').notNull(), ruleVersion: text('rule_version').default('personal-v1').notNull(),
-}, t => [index('attribution_user').on(t.userId), check('attribution_person_pair', sql`(${t.userId} IS NULL)=(${t.accountId} IS NULL)`)]);
+  shareDivisor: integer('share_divisor').default(1).notNull(),
+  method: text('method').notNull(), ruleVersion: text('rule_version').default('personal-v2').notNull(),
+}, t => [index('attribution_user').on(t.userId), uniqueIndex('attribution_submission_user').on(t.submissionId, t.userId), uniqueIndex('attribution_unassigned').on(t.submissionId).where(sql`${t.userId} IS NULL`), check('attribution_share_divisor', sql`${t.shareDivisor}>0`), check('attribution_person_pair', sql`(${t.userId} IS NULL)=(${t.accountId} IS NULL)`)]);
 export const syncCursors = pgTable('sync_cursors', {
   id: uuid('id').defaultRandom().primaryKey(), accountId: uuid('account_id').notNull().references(() => platformAccounts.id),
   mode: text('mode').notNull(), cursor: jsonb('cursor'), checkpoint: jsonb('checkpoint'), version: integer('version').default(1).notNull(),

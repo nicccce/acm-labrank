@@ -2,22 +2,22 @@ import type { PoolClient } from 'pg';
 import { assertCollectionAvailable, collectionTransaction as transaction } from '../collection/settings';
 import { lockRunBinding } from './locks';
 import type { BindingRow, SyncRow } from './types';
+import { attributionInsertSql, authorKeysSql } from './attribution-sql';
 
 export async function rebuildAttributions(client: PoolClient, platform: string, filter: { submissionIds?: string[]; accountIds?: string[] }) {
   if (!filter.submissionIds?.length && !filter.accountIds?.length) return;
   const pageOnly = !!filter.submissionIds?.length;
-  const affected = pageOnly ? 's.external_submission_id=ANY($2::text[])' : '(a.account_id=ANY($2::uuid[]) OR prior.account_id=ANY($2::uuid[]))';
-  // Query target is never author evidence. Explicit team evidence always wins.
-  await client.query(`INSERT INTO submission_attributions(submission_id,user_id,account_id,method)
-    SELECT s.id,b.user_id,b.account_id,CASE WHEN b.user_id IS NULL THEN 'unassigned' ELSE 'verified_person' END
-    FROM submissions s LEFT JOIN platform_account_aliases a ON a.platform=s.platform AND a.key=CASE WHEN s.platform='codeforces' THEN lower(s.subject_evidence->'authorAccountKeys'->>0) ELSE s.subject_evidence->'authorAccountKeys'->>0 END
-      AND jsonb_array_length(coalesce(s.subject_evidence->'authorAccountKeys','[]'))=1
-      AND NOT (s.subject_evidence ? 'teamId') AND NOT (s.subject_evidence ? 'teamName')
-      AND (NOT (s.subject_evidence ? 'authorMembers') OR jsonb_array_length(s.subject_evidence->'authorMembers')=1)
-    LEFT JOIN platform_bindings b ON b.account_id=a.account_id
-    LEFT JOIN submission_attributions prior ON prior.submission_id=s.id
-    WHERE s.platform=$1 AND ${affected}
-    ON CONFLICT(submission_id) DO UPDATE SET user_id=EXCLUDED.user_id,account_id=EXCLUDED.account_id,method=EXCLUDED.method`, [platform, pageOnly ? filter.submissionIds : filter.accountIds]);
+  const affected = pageOnly ? 's.external_submission_id=ANY($2::text[])' : `(
+    EXISTS (SELECT 1 FROM platform_account_aliases a WHERE a.platform=s.platform AND a.account_id=ANY($2::uuid[]) AND a.key=ANY(${authorKeysSql}))
+    OR EXISTS (SELECT 1 FROM submission_attributions prior WHERE prior.submission_id=s.id AND prior.account_id=ANY($2::uuid[]))
+  )`;
+  // Lock facts in a consistent order before replacing all member shares. The
+  // fetching account never supplies author evidence; binding changes also
+  // rebuild submissions where that account appears after the first member.
+  const ids = (await client.query<{ id: string }>(`SELECT s.id FROM submissions s WHERE s.platform=$1 AND ${affected} ORDER BY s.id FOR UPDATE`, [platform, pageOnly ? filter.submissionIds : filter.accountIds])).rows.map(s => s.id);
+  if (!ids.length) return;
+  await client.query('DELETE FROM submission_attributions WHERE submission_id=ANY($1::uuid[])', [ids]);
+  await client.query(attributionInsertSql, [ids]);
 }
 export interface FactPage {
   problems: { platform: string; problemKey: string; title: string; nativeDifficulty: number | null; difficultyObserved?: boolean; sourceUrl: string; observedAt?: string }[];

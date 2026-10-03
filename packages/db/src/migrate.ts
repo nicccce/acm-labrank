@@ -1,6 +1,5 @@
-import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { closeDb, getDb, getPool } from './client';
+import { closeDb, getPool } from './client';
+import { migrateSchema } from './schema-migrations';
 import { createBoss, PROBE_QUEUE, PLATFORM_READ_QUEUES, PERSONAL_QUEUES, QOJ_SESSION_QUEUE } from './queue';
 import { initializePlatformPolicies } from './collection/policies';
 import { initializeCollectionSettings } from './collection/settings';
@@ -12,7 +11,7 @@ try {
   const result = await lock.query('SELECT pg_try_advisory_lock(73192401) AS locked');
   locked = result.rows[0].locked;
   if (!locked) throw new Error('Another migration is already running');
-  await migrate(getDb(), { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
+  await migrateSchema();
   await initializePlatformPolicies();
   await getPool().query(`INSERT INTO platform_connections(id,platform)
     SELECT DISTINCT CASE WHEN platform='qoj' AND right(id,8)=':browser' THEN left(id,length(id)-8) ELSE id END,platform

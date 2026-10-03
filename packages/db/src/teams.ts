@@ -114,7 +114,7 @@ export async function searchMembers(search: string, limit: number, offset: numbe
 export interface TeamScoreRow { id: string; name: string; points: number; solveCount: number; platformSolveCounts: Record<string, number>; lastAcAt: Date | null; rank: number | null; total: number }
 function teamTotalsSql(q: QueryRange) {
   return `${personTotalsSql(q)}, team_totals AS (
-    SELECT t.id,t.name,coalesce(sum(p.points),0)::int AS points,coalesce(sum(p."solveCount"),0)::int AS "solveCount",
+    SELECT t.id,t.name,coalesce(sum(p.points),0)::double precision AS points,coalesce(sum(p."solveCount"),0)::int AS "solveCount",
     jsonb_build_object('codeforces',coalesce(sum((p."platformSolveCounts"->>'codeforces')::int),0),'luogu',coalesce(sum((p."platformSolveCounts"->>'luogu')::int),0),'qoj',coalesce(sum((p."platformSolveCounts"->>'qoj')::int),0)) AS "platformSolveCounts",max(p."lastAcAt") AS "lastAcAt",t.archived_at
     FROM teams t LEFT JOIN team_memberships m ON m.team_id=t.id AND m.left_at IS NULL LEFT JOIN person_totals p ON p.id=m.user_id GROUP BY t.id
   ), ranked_teams AS (SELECT *,rank() OVER (ORDER BY points DESC,"solveCount" DESC,"lastAcAt" DESC NULLS LAST)::int AS rank,count(*) OVER()::int AS total FROM team_totals WHERE archived_at IS NULL)`;

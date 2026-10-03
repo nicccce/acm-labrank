@@ -22,6 +22,7 @@
     "queue:probe": "tsx --env-file-if-exists=.env scripts/queue-probe.ts",
     "cf:read": "tsx --env-file-if-exists=.env apps/worker/src/codeforces-read.ts",
     "cf:lease-probe": "tsx --env-file-if-exists=.env scripts/platform-lease-probe.ts",
+    "cf:shared:verify": "tsx --env-file-if-exists=.env scripts/verify-cf-shared.ts",
     "verify:smoke": "node scripts/smoke.mjs",
     "qoj:debug": "tsx --env-file-if-exists=.env apps/worker/src/qoj-debug.ts",
     "qoj:confirm": "tsx --env-file-if-exists=.env scripts/qoj-confirm.ts",

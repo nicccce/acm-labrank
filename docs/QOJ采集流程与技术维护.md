@@ -62,17 +62,25 @@ docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --wait
 
 ### 启动未接管的专用浏览器
 
-新建浏览器会话时，在当前 PowerShell 设置以下配置后启动 Worker：
+旧维护模式需要显式覆盖 Compose 固定的启动设置。在 `.local/qoj-manual.compose.yaml` 写入以下内容：
+
+```yaml
+services:
+  worker:
+    environment:
+      QOJ_BROWSER_MANUAL_START: "true"
+      QOJ_BROWSER_START_TARGET: muhammad
+      QOJ_HUMAN_RETRIES: "0"
+```
+
+再启动尚未接管的 Worker：
 
 ```powershell
-$env:QOJ_BROWSER_MANUAL_START='true'
-$env:QOJ_BROWSER_START_TARGET='muhammad'
-$env:QOJ_HUMAN_RETRIES='0'
-docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --no-deps --no-build worker
+docker compose -f compose.yaml -f compose.qoj-browser.yaml -f .local/qoj-manual.compose.yaml up -d --no-deps --no-build worker
 docker logs --tail 10 acm-leaderboard-worker-1
 ```
 
-这里的 `--no-deps` 要求应用依赖已准备好；不代替首次数据库初始化。PowerShell 环境变量只影响从该终端运行的 compose 命令，后续部署应把需要保留的值写入受保护的部署配置。
+这里的 `--no-deps` 要求应用依赖已准备好，不代替首次数据库初始化。源码部署还需按 README 追加两份 build 配置，并把上述维护配置放在最后。后续管理该实例时保留同样的配置组合；只设置宿主环境变量不会覆盖 Compose 固定值。
 
 容器启动 Chromium 并打开目标主页，同时产生 `qoj_browser_manual_start` 事件。常驻 Worker 在消费本次确认前不连接 CDP。记录事件 id 和 expiresAt，接管事件有效期为 10 分钟。
 

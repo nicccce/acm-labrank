@@ -23,7 +23,7 @@ export function decryptLuoguSession(value: string, key: Buffer, id: string) {
 }
 
 /** Every jar read/update happens inside the application's shared platform lease. */
-export async function createLuoguRequestContext(options: { connectionId: string; signal: AbortSignal; temporary?: boolean; initialJar?: string; fetchImpl?: typeof fetch; expectedGeneration?: number }) {
+export async function createLuoguRequestContext(options: { connectionId: string; signal: AbortSignal; temporary?: boolean; initialJar?: string; fetchImpl?: typeof fetch; expectedGeneration?: number; beforeRequest?: () => Promise<void> }) {
   const generation = options.expectedGeneration ?? (await ensureCollectionConnection(options.connectionId, 'luogu')).generation;
   const file = process.env.SESSION_ENCRYPTION_KEY_FILE;
   if (!file) throw new Error('SESSION_ENCRYPTION_KEY_FILE_REQUIRED');
@@ -33,7 +33,7 @@ export async function createLuoguRequestContext(options: { connectionId: string;
   // The private marker also binds captcha state to this request context.
   const marker = Object.freeze({ connectionId: options.connectionId });
   const ctx = createRequestContext({ platform: 'luogu', signal: options.signal, allowedMethods: ['GET', 'POST'], allowImages: true,
-    maxResponseBytes: 4 * 1024 * 1024, fetchImpl: options.fetchImpl,
+    maxResponseBytes: 4 * 1024 * 1024, fetchImpl: options.fetchImpl, beforeRequest: options.beforeRequest,
     sessionHooks: {
       async beforeRequest(_token, url, init) {
         if (new Headers(init.headers).has('cookie')) throw new ConnectorError('INVALID_INPUT', 'Cookie 必须由公共会话层管理');

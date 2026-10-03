@@ -1,4 +1,5 @@
 import { getPool } from '../client';
+import { collectionTransaction } from './settings';
 
 export interface LoginAttempt {
   id: string; session_id: string; connection_id: string; generation: number; state: string; version: number;
@@ -28,13 +29,11 @@ export async function getCollectionControl() {
   return (await getPool().query<{ enabled: boolean; version: number }>('SELECT enabled,version FROM collection_control WHERE id=1')).rows[0]!;
 }
 export async function setCollectionControl(enabled: boolean, version: number, actorId: string) {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
+  return collectionTransaction(async client => {
     const result = await client.query('UPDATE collection_control SET enabled=$1,version=version+1,updated_at=now() WHERE id=1 AND version=$2 RETURNING enabled,version', [enabled, version]);
     if (result.rowCount) await client.query("INSERT INTO collection_audit_logs(actor_id,action,target,details) VALUES ($1,'collection_control','collection',$2)", [actorId, JSON.stringify({ enabled })]);
-    await client.query('COMMIT'); return result.rows[0] ?? null;
-  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+    return result.rows[0] ?? null;
+  }, true);
 }
 export async function disconnectCollectionConnection(id: string, platform: string, actorId: string) {
   const client = await getPool().connect();

@@ -1,16 +1,18 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { platforms } from '@acm/connectors/metadata';
-import { currentSession } from '../lib/http';
-import { LogoutButton } from '../components/logout-button';
+import { getPersonalLeaderboard } from '@acm/core/server';
+import { loadPage, MemberShell, memberSession, pageParams, PageError, scorePlatforms, type PageSearch } from '../lib/member-page';
+import { ScoreFilter } from '../components/score-filter';
+import { formatTime, Pagination } from '../components/score-display';
 export const dynamic = 'force-dynamic';
-export default async function HomePage() {
-  const session = await currentSession();
-  if (!session) redirect('/login');
-  return <main className="mx-auto max-w-5xl px-6 py-10">
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6"><div><p className="text-sm font-semibold text-blue-700">ACM 实验室</p><h1 className="mt-2 text-3xl font-bold">训练榜单</h1></div><LogoutButton csrfToken={session.csrfToken} /></header>
-    <section className="py-8"><h2 className="text-xl font-semibold">你好，{session.user.displayName}</h2>{session.user.role === 'admin' && <Link className="mt-3 inline-block rounded border px-4 py-2 text-blue-700" href="/admin/connections">管理平台登录与采集</Link>}<p className="mt-2 text-slate-600">个人记录与榜单已提供后端 API，展示页面后续接入。</p></section>
-    <section className="grid gap-4 md:grid-cols-3" aria-label="平台接入状态">{platforms.map((platform) => <article key={platform.id} className="rounded-2xl border border-slate-200 bg-white p-6"><h3 className="font-semibold">{platform.name}</h3><p className="mt-3 text-sm text-slate-500">尚未接入</p></article>)}</section>
-    <section className="mt-8 rounded-2xl border border-dashed border-slate-300 p-8 text-center"><h2 className="font-semibold">训练记录等待接入</h2><p className="mt-2 text-sm text-slate-600">当前提供账号注册和登录。绑定平台账号、个人榜及队伍功能将逐步开放。</p></section>
-  </main>;
+export default async function HomePage({ searchParams }: { searchParams: PageSearch }) {
+  const session = await memberSession(), params = await pageParams(searchParams);
+  const [result, platforms] = await Promise.all([loadPage(() => getPersonalLeaderboard(params)), scorePlatforms()]);
+  const data = result.data;
+  const detailQuery = new URLSearchParams(params); detailQuery.delete('page');
+  return <MemberShell session={session} title="个人榜">{data ? <>
+    <ScoreFilter key={params.toString()} query={Object.fromEntries(params)} range={data.range} platforms={platforms} />
+    {data.provisional && <p className="muted">积分与排名暂定</p>}
+    <div className="table-wrap"><table className="data-table"><thead><tr><th>排名</th><th>姓名</th><th>积分</th><th>题数</th><th>CF</th><th>QOJ</th><th>洛谷</th><th>最近 AC</th></tr></thead><tbody>{data.items.map(row => <tr key={row.id}><td>{row.rank}</td><td><Link href={`/members/${row.id}?${detailQuery}`}>{row.displayName}</Link></td><td>{row.points}</td><td>{row.solveCount}</td><td>{row.platformSolveCounts.codeforces ?? 0}</td><td>{row.platformSolveCounts.qoj ?? 0}</td><td>{row.platformSolveCounts.luogu ?? 0}</td><td>{formatTime(row.lastAcAt)}</td></tr>)}{!data.items.length && <tr><td colSpan={8}>暂无数据</td></tr>}</tbody></table></div>
+    <Pagination path="/" params={params} page={data.page} limit={data.limit} total={data.total} />
+  </> : <PageError message={result.error!} />}</MemberShell>;
 }

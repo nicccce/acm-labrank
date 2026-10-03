@@ -1,11 +1,13 @@
 # ACM 实验室榜单
 
-pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzle 和 pg-boss。已实现本地认证、Web 洛谷验证码登录、内嵌 QOJ noVNC、三平台个人绑定、按需同步、提交事实入库及个人榜/明细 API。2026-10-03 已在管理员完成登录后验证三平台真实分页、正式入库及自动续跑；回填完成前查询返回暂定标记。队伍、周期同步和榜单展示页面后续实施。
+pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzle 和 pg-boss。已实现统一注册登录、成员资料与三平台账号绑定、个人榜和明细页面，以及团队创建去重、成员管理和团队榜。团队按当前成员在整个查询区间内的个人成绩汇总。管理员可设置采集与计分平台、日期、定时周期和请求间隔，手动更新、局部重爬及管理平台登录；历史未完整时成绩标为暂定。独立比赛/VP、外站队伍绑定与组队提交纠正后续实施。
 
 ## 文档入口
 
 - [文档索引](docs/README.md)：当前维护文档与历史记录。
 - [个人后端与 Web 登录](docs/个人后端与Web登录.md)：本轮 API、管理员交接、采集开关和离线集成验证。
+- [成员页面与团队榜](docs/成员页面与团队榜.md)：页面、团队计分、去重和接口。
+- [管理员采集管理](docs/管理员采集管理.md)：管理页、定时增量、计分区间、平台选择和局部重爬。
 - [采集架构与管理 API](docs/采集架构与管理API.md)：公共契约、数据库限流、连接状态、错误处理与部署。
 - [QOJ 运行手册](docs/QOJ采集流程与技术维护.md)：专用浏览器、人工登录、接管与故障处理。
 - 连接器规则：[Codeforces](packages/connectors/src/codeforces/README.md)、[洛谷](packages/connectors/src/luogu/README.md)、[QOJ](packages/connectors/src/qoj/README.md)。
@@ -22,7 +24,7 @@ docker compose ps
 
 默认访问 <http://localhost:3000>。管理员用户名在本地 `.env`，初始密码在受保护的 `.secrets/admin-bootstrap-password`。初始化重复运行保留既有配置；已有管理员时引导跳过。正式部署把 `APP_URL` 配为实际 HTTPS 地址。
 
-本地登录测试使用 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build`，打开 <http://localhost:3000/admin/connections>。初次迁移暂停提交采集，管理员先完成洛谷表单登录及 QOJ 桌面登录/身份核验，再启用采集。`docker compose run --rm --no-deps seed` 创建测试成员及待验证候选；测试密码见 `.secrets/member-test-password`。
+本地登录测试使用 `docker compose -f compose.yaml -f compose.qoj-browser.yaml up -d --build`。打开 <http://localhost:3000/admin/collection>，默认仅启用 CF，初次迁移暂停采集、关闭自动同步；确认成员绑定后即可启用。需要 QOJ/洛谷时先在 <http://localhost:3000/admin/connections> 登录/核验，再加入采集。`docker compose run --rm --no-deps seed` 创建测试成员及待验证候选；测试密码见 `.secrets/member-test-password`。
 
 默认仅发布宿主回环 Web 端口，数据库不发布。QOJ 专用浏览器使用可选 `compose.qoj-browser.yaml`，启动与人工登录见运行手册。网络受限时可向构建传入 `NPM_REGISTRY` 指向可信 HTTPS npm 源；本机历史排障不作为新环境启动前提。
 
@@ -56,7 +58,7 @@ docs/                            当前文档，archive/ 为历史记录
 
 依赖方向为 `apps → core/application → db、connectors`。连接器不写库，领域规则不访问数据库或网络。客户端仅导入 `@acm/core/domain`、`@acm/connectors/contracts` 或 `metadata`；服务端使用共享包公开入口，ESLint 检查依赖边界。
 
-当前表包含认证、共享配额、加密会话与登录尝试、平台身份/绑定、题目/提交/归属及同步游标/运行。原有读取运行仍保存诊断摘要；正式个人同步按页事务保存事实及业务游标。
+当前表包含认证、共享配额、加密会话与登录尝试、平台身份/绑定、题目/提交/归属、同步游标/运行，以及队伍、成员关系历史和团队操作记录。原有读取运行仍保存诊断摘要；正式个人同步按页事务保存事实及业务游标。
 
 ## 本地开发与检查
 
@@ -83,7 +85,7 @@ pnpm dev
 | `pnpm db:migrate` | 业务迁移、队列 schema 与策略初始化 |
 | `pnpm queue:probe` | 真实数据库下的基础队列验证 |
 | `pnpm collection:probe` | 独立测试库下的采集集成验证；限制见采集文档 |
-| `pnpm personal:verify` | 自动创建独立测试库，以本地样本验证个人事实、榜单、队列与持久化登录 |
+| `pnpm personal:verify` | 独立测试库验证个人事实、登录、配置、调度和局部重爬；`--http` 在含 Chromium 镜像额外验证 HTTP 和页面 |
 | `pnpm members:seed` | 幂等创建测试成员及三平台候选，不重置已有密码 |
 | `pnpm verify:smoke` | HTTP 验证，会创建临时 member |
 

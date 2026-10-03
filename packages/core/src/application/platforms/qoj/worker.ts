@@ -52,7 +52,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
   const humanRetries = options.humanRetries ?? 2;
   if (!Number.isInteger(humanTimeout) || humanTimeout < 1 || humanTimeout > 600000 || !Number.isInteger(humanRetries) || humanRetries < 0 || humanRetries > 5) throw new ConnectorError('INVALID_INPUT', 'Invalid QOJ human input limits');
 
-  async function execute(input: QojReadJob, taskSignal: AbortSignal, onPage: (page: SubmissionPage) => Promise<void> = async () => undefined, generation?: number, onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>) {
+  async function execute(input: QojReadJob, taskSignal: AbortSignal, onPage: (page: SubmissionPage) => Promise<void> = async () => undefined, generation?: number, onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>, beforeRequest?: () => Promise<void>) {
     const job = qojReadJobSchema.parse(input);
     const started = Date.now();
     const budget = AbortSignal.timeout(job.maxDurationMs);
@@ -82,7 +82,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
         attachmentConfirmed = true;
       }
       if (options.transport === 'browser' && !runtime) runtime = await (options.browserFactory ?? createQojBrowserRequestContext)({ ...options.browser, keepBrowserSession: attachmentConfirmed, connectionId: options.connectionId, signal: lifetimeSignal });
-      const raw = runtime?.scopedContext(signal, generation) ?? await (options.nodeFactory ?? createQojRequestContext)({ connectionId: options.connectionId, signal, timeoutMs: options.browser?.timeoutMs, maxRetries: options.browser?.maxRetries, memoryStore: options.browser?.memoryStore, expectedGeneration: generation });
+      const raw = runtime?.scopedContext(signal, generation, beforeRequest) ?? await (options.nodeFactory ?? createQojRequestContext)({ connectionId: options.connectionId, signal, timeoutMs: options.browser?.timeoutMs, maxRetries: options.browser?.maxRetries, memoryStore: options.browser?.memoryStore, expectedGeneration: generation, beforeRequest });
       async function human(kind: QojHumanInput['kind'], url: URL, requestSignal: AbortSignal) {
         if (!runtime || options.browser?.headed === false || !options.onHumanInput || humanAttempts++ >= humanRetries) throw new ConnectorError(kind === 'login' && !runtime ? 'AUTH_REQUIRED' : 'CHALLENGE_REQUIRED', 'QOJ requires human input; committed progress retained');
         const controller = new AbortController();
@@ -103,6 +103,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
         const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
         while (true) {
           requestSignal.throwIfAborted();
+          await beforeRequest?.();
           const response = await raw.request(url, { ...init, signal: requestSignal });
           const issue = qojResponseIssue(response, await response.clone().text());
           const finalUrl = new URL(response.url || url);

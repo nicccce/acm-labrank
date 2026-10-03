@@ -67,7 +67,7 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
   return <div className="space-y-8">
     <section className="rounded border bg-white p-5">
       <h2 className="text-lg font-semibold">采集控制</h2>
-      <p className="my-3">当前：{control.enabled ? '已启用' : '已暂停'}。请先完成下面两个平台的登录验证，再启用提交采集。</p>
+      <p className="my-3">当前：{control.enabled ? '已启用' : '已暂停'}。CF 无需平台登录；QOJ、洛谷在启用并登录后参与采集，可前往采集管理页选择平台。</p>
       <button className={button} disabled={busy} onClick={() => void action(async () => { const updated = await call('/api/admin/collection-control', 'PUT', { enabled: !control.enabled, version: control.version }); setControl(updated); setMessage(updated.enabled ? '采集已启用，worker 会接收已入队任务。' : '采集已暂停，身份核验仍可使用。'); })}>{control.enabled ? '暂停采集' : '启用采集'}</button>
     </section>
     <section className="rounded border bg-white p-5">

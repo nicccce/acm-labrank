@@ -11,7 +11,12 @@ try {
   const target = new URL(baseUrl); target.pathname = `/${name}`; process.env.DATABASE_URL = target.href;
   const migrate = spawnSync('pnpm', ['db:migrate'], { env: process.env, encoding: 'utf8' });
   if (migrate.status !== 0) throw new Error('Isolated database migration failed');
-  await import('./personal-probe'); passed = true;
+  await import('./personal-probe');
+  await import('./collection-management-probe');
+  if (process.argv.includes('--http')) await import('./collection-http-probe');
+  await import('./member-probe');
+  if (process.argv.includes('--http')) await import('./member-http-probe');
+  passed = true;
 } finally {
   await closeDb(); process.env.DATABASE_URL = baseUrl;
   if (passed) await getPool().query(`DROP DATABASE "${name}" WITH (FORCE)`);

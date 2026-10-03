@@ -21,7 +21,7 @@ export function decryptQojSession(value: string, key: Buffer, connection: string
 }
 
 /** Web login and Worker use the same platform lease; only encrypted jars cross processes. */
-export async function createQojRequestContext(options: { connectionId: string; signal: AbortSignal; cookieHeader?: string; userAgent?: string; memoryStore?: PlatformRequestStore; fetchImpl?: typeof fetch; timeoutMs?: number; maxRetries?: number; expectedGeneration?: number }) {
+export async function createQojRequestContext(options: { connectionId: string; signal: AbortSignal; cookieHeader?: string; userAgent?: string; memoryStore?: PlatformRequestStore; fetchImpl?: typeof fetch; timeoutMs?: number; maxRetries?: number; expectedGeneration?: number; beforeRequest?: () => Promise<void> }) {
   let key: Buffer | undefined;
   if (!options.memoryStore) {
     const file = process.env.SESSION_ENCRYPTION_KEY_FILE;
@@ -33,7 +33,7 @@ export async function createQojRequestContext(options: { connectionId: string; s
   let ua = options.userAgent ?? 'acm-labrank/1.0';
   let importHeader = options.cookieHeader;
   let generation = options.expectedGeneration;
-  return createRequestContext({ platform: 'qoj', signal: options.signal, allowedMethods: ['GET', 'POST'], store: options.memoryStore, fetchImpl: options.fetchImpl,
+  return createRequestContext({ platform: 'qoj', signal: options.signal, beforeRequest: options.beforeRequest, allowedMethods: ['GET', 'POST'], store: options.memoryStore, fetchImpl: options.fetchImpl,
     timeoutMs: options.timeoutMs, leaseMs: Math.max(45000, (options.timeoutMs ?? 30000) + 15000), maxRetries: options.maxRetries,
     minIntervalMs: Math.max(1000, Number(process.env.QOJ_MIN_INTERVAL_MS ?? 3000)),
     maxResponseBytes: 4 * 1024 * 1024,

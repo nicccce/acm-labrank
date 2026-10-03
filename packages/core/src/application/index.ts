@@ -15,4 +15,6 @@ export * from './collection/contracts';
 export * from './collection/jobs';
 export * from './collection/admin';
 export * from './personal';
+export * from './collection/settings';
+export * from './teams';
 export type { PlatformId, PlatformReadRequest, PlatformReadOutcome } from '@acm/connectors/contracts';

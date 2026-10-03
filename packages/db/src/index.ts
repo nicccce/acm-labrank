@@ -10,3 +10,6 @@ export * from './collection/runs';
 export * from './collection/login-attempts';
 export * from './personal';
 export * from './personal-queries';
+export * from './collection/settings';
+export * from './collection/management';
+export * from './teams';

@@ -24,6 +24,25 @@ export const sessions = pgTable('sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [uniqueIndex('sessions_token_hash_unique').on(table.tokenHash), index('sessions_user_id_idx').on(table.userId), index('sessions_expires_at_idx').on(table.expiresAt)]);
 
+export const teams = pgTable('teams', {
+  id: uuid('id').defaultRandom().primaryKey(), name: text('name').notNull(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  rosterKey: text('roster_key').notNull(), version: integer('version').default(1).notNull(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, t => [uniqueIndex('team_active_roster').on(t.rosterKey).where(sql`${t.archivedAt} IS NULL`), check('team_values', sql`length(btrim(${t.name})) BETWEEN 1 AND 64 AND ${t.version}>0`)]);
+export const teamMemberships = pgTable('team_memberships', {
+  id: uuid('id').defaultRandom().primaryKey(), teamId: uuid('team_id').notNull().references(() => teams.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+  leftAt: timestamp('left_at', { withTimezone: true }),
+}, t => [uniqueIndex('team_current_member').on(t.teamId, t.userId).where(sql`${t.leftAt} IS NULL`), index('team_member_user').on(t.userId, t.teamId), check('membership_interval', sql`${t.leftAt} IS NULL OR ${t.leftAt}>=${t.joinedAt}`)]);
+export const teamEvents = pgTable('team_events', {
+  id: uuid('id').defaultRandom().primaryKey(), teamId: uuid('team_id').notNull().references(() => teams.id),
+  actorId: uuid('actor_id').notNull().references(() => users.id), action: text('action').notNull(),
+  details: jsonb('details').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const authRateLimits = pgTable('auth_rate_limits', {
   key: text('key').primaryKey(),
   attempts: integer('attempts').notNull(),
@@ -118,6 +137,20 @@ export const collectionControl = pgTable('collection_control', {
   version: integer('version').default(1).notNull(), updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, t => [check('collection_control_singleton', sql`${t.id}=1`)]);
 
+export const collectionSettings = pgTable('collection_settings', {
+  id: integer('id').primaryKey(), platforms: text('platforms').array().default(['codeforces']).notNull(),
+  autoSyncEnabled: boolean('auto_sync_enabled').default(false).notNull(), syncIntervalMinutes: integer('sync_interval_minutes').default(360).notNull(),
+  scoreRange: jsonb('score_range').default({ kind: 'rolling', days: 30 }).notNull(), version: integer('version').default(1).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(), updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+}, t => [check('collection_settings_values', sql`${t.id}=1 AND ${t.version}>0 AND ${t.syncIntervalMinutes} BETWEEN 1 AND 10080 AND ${t.platforms}<@ARRAY['codeforces','luogu','qoj']::text[]`)]);
+export const collectionPlatformState = pgTable('collection_platform_state', {
+  platform: text('platform').primaryKey(), generation: integer('generation').default(1).notNull(),
+}, t => [check('collection_platform_values', sql`${t.platform} IN ('codeforces','luogu','qoj') AND ${t.generation}>0`)]);
+export const collectionResetRequests = pgTable('collection_reset_requests', {
+  id: uuid('id').primaryKey(), actorId: uuid('actor_id').notNull().references(() => users.id),
+  input: jsonb('input').notNull(), result: jsonb('result').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const platformLoginAttempts = pgTable('platform_login_attempts', {
   id: uuid('id').primaryKey(), sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
   connectionId: text('connection_id').notNull().references(() => platformConnections.id), generation: integer('generation').notNull(),
@@ -139,6 +172,7 @@ export const platformBindings = pgTable('platform_bindings', {
   platform: text('platform').notNull(), accountId: uuid('account_id').references(() => platformAccounts.id),
   candidate: text('candidate'), candidateState: text('candidate_state'), candidateError: text('candidate_error'),
   version: integer('version').default(1).notNull(), verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  nextSyncAt: timestamp('next_sync_at', { withTimezone: true }).defaultNow(), syncBlocked: text('sync_blocked'), syncRequested: boolean('sync_requested').default(false).notNull(),
 }, t => [uniqueIndex('binding_user_platform').on(t.userId, t.platform), uniqueIndex('binding_account_owner').on(t.accountId).where(sql`${t.accountId} IS NOT NULL`), foreignKey({ columns: [t.accountId, t.platform], foreignColumns: [platformAccounts.id, platformAccounts.platform] }), check('binding_candidate_state', sql`${t.candidateState} IS NULL OR ${t.candidateState} IN ('pending','verified','not_found','occupied','unavailable','unsupported')`)]);
 export const problems = pgTable('problems', {
   id: uuid('id').defaultRandom().primaryKey(), platform: text('platform').notNull(), problemKey: text('problem_key').notNull(),
@@ -170,6 +204,8 @@ export const syncRuns = pgTable('sync_runs', {
   batch: integer('batch').default(0).notNull(), jobId: uuid('job_id'), queue: text('queue').notNull(),
   pages: integer('pages').default(0).notNull(), records: integer('records').default(0).notNull(), retries: integer('retries').default(0).notNull(),
   error: jsonb('error'), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }), collectionGeneration: integer('collection_generation').default(1).notNull(),
+  source: text('source').default('binding').notNull(), requestedBy: uuid('requested_by').references(() => users.id, { onDelete: 'set null' }),
   rangeFrom: timestamp('range_from', { withTimezone: true }), rangeTo: timestamp('range_to', { withTimezone: true }),
   scanCursor: jsonb('scan_cursor'), scanCheckpoint: jsonb('scan_checkpoint'), cursorVersion: integer('cursor_version').default(1).notNull(),
   stopReason: text('stop_reason').default('more').notNull(), rangeComplete: boolean('range_complete').default(false).notNull(),

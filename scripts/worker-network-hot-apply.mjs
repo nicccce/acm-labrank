@@ -11,15 +11,15 @@ if (reloadWorker) {
   // the healthy process, including the exact migration count used at startup.
   execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "const db = await import('./packages/db/src/index.ts'); try { if (!await db.checkDatabaseReady()) throw new Error('Schema not ready'); if ((await db.getCollectionControl()).enabled) throw new Error('Pause collection first'); } finally { await db.closeDb(); }"], { cwd: '/app', stdio: 'pipe' });
 }
-if (!upstream) throw new Error('PLATFORM_HTTPS_PROXY_REQUIRED');
-const proxy = new URL(upstream);
-if (proxy.protocol !== 'http:' || proxy.username || proxy.password || !['', '/'].includes(proxy.pathname) || proxy.search || proxy.hash) throw new Error('INVALID_PROXY');
+if (!upstream && !reloadWorker) throw new Error('PLATFORM_HTTPS_PROXY_REQUIRED');
+const proxy = upstream ? new URL(upstream) : null;
+if (proxy && (proxy.protocol !== 'http:' || proxy.username || proxy.password || !['', '/'].includes(proxy.pathname) || proxy.search || proxy.hash)) throw new Error('INVALID_PROXY');
 const matches = [];
 for (const name of await readdir('/proc')) {
   if (!/^\d+$/.test(name)) continue;
   try {
     const args = (await readFile(`/proc/${name}/cmdline`, 'utf8')).split('\0').filter(Boolean);
-    if (args[0]?.endsWith('/node') && args.includes('--import') && args.at(-1) === 'src/index.ts') matches.push(Number(name));
+    if (args[0]?.endsWith('/node') && args.some(arg => arg === '--import' || arg.startsWith('--import=')) && ['src/index.ts', '/app/apps/worker/src/index.ts'].includes(args.at(-1))) matches.push(Number(name));
   } catch { /* Process exited. */ }
 }
 if (matches.length !== 1) throw new Error('EXACT_WORKER_PROCESS_REQUIRED');
@@ -55,10 +55,12 @@ async function evaluate(expression) {
 }
 try {
   if (reloadWorker && !await evaluate("typeof process.execve === 'function'")) throw new Error('WORKER_RELOAD_UNSUPPORTED');
-  const proxyEnv = { HTTP_PROXY: upstream, HTTPS_PROXY: upstream, NO_PROXY: 'localhost,127.0.0.1,::1,web,worker,db,qoj-relay' };
-  const result = await evaluate(`(() => { const settings = ${JSON.stringify(proxyEnv)}; Object.assign(process.env, settings, { NODE_USE_ENV_PROXY: '1' }); process.getBuiltinModule('node:http').setGlobalProxyFromEnv(settings); return { applied: true }; })()`);
-  if (!result?.applied) throw new Error('NETWORK_APPLY_FAILED');
-  console.log(JSON.stringify({ event: 'worker_network_applied', browserRestarted: false, inspectorPublished: false }));
+  if (upstream) {
+    const proxyEnv = { HTTP_PROXY: upstream, HTTPS_PROXY: upstream, NO_PROXY: 'localhost,127.0.0.1,::1,web,worker,db,qoj-relay' };
+    const result = await evaluate(`(() => { const settings = ${JSON.stringify(proxyEnv)}; Object.assign(process.env, settings, { NODE_USE_ENV_PROXY: '1' }); process.getBuiltinModule('node:http').setGlobalProxyFromEnv(settings); return { applied: true }; })()`);
+    if (!result?.applied) throw new Error('NETWORK_APPLY_FAILED');
+    console.log(JSON.stringify({ event: 'worker_network_applied', browserRestarted: false, inspectorPublished: false }));
+  }
   if (reloadWorker) {
     // Linux execve replaces this Node process in place: the desktop supervisor
     // observes no child exit and Chromium/CDP/VNC retain their existing sessions.

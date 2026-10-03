@@ -1,6 +1,6 @@
 # 个人后端与 Web 登录
 
-本轮实现三平台个人绑定、按需同步、正式事实存储及查询 API。队伍、独立比赛/VP、周期爬取和榜单前端不在本轮范围。2026-10-03 管理员完成登录并确认后，已验证三平台两页真实列表的作者、分页、时间、原始判题和当前采集身份，随后热启用提交采集，验证正式入库、重复请求合并及独立批次自动续投。
+已实现三平台个人绑定、按需同步、正式事实存储及查询 API。管理员采集配置见[管理员采集管理](管理员采集管理.md)，普通成员页面、姓名编辑、队伍管理与团队榜见[成员页面与团队榜](成员页面与团队榜.md)；独立比赛/VP、外站队伍绑定和归属纠正后续实施。2026-10-03 管理员完成登录并确认后，已验证三平台两页真实列表的作者、分页、时间、原始判题和当前采集身份，随后热启用提交采集，验证正式入库、重复请求合并及独立批次自动续投。
 
 ## 本地交接
 
@@ -12,9 +12,9 @@ docker compose run --rm --no-deps seed
 
 打开 <http://localhost:3000/admin/connections>，使用已有本站管理员登录。初始用户名见 `.env` 的 `ADMIN_BOOTSTRAP_USERNAME`，密码从 `.secrets/admin-bootstrap-password` 本地读取。QOJ 的 VNC 密码见 `.secrets/qoj-vnc-password`，手动输入，不能放进 URL。
 
-初次迁移的 `collection_control.enabled=false`。此时账号候选可以入队，但 worker 不消费提交/绑定队列，不进行自动鉴权恢复；独立 QOJ 身份核验仍可运行。洛谷成功登录只访问登录、验证码及身份页面，不读提交列表。QOJ 核验仅访问身份入口 `/`。
+初次迁移的 `collection_control.enabled=false`。账号候选保存为待验证，恢复采集且对应平台启用/登录后才入队；worker 不消费提交/绑定队列，不进行自动鉴权恢复。独立 QOJ 身份核验仍可运行。洛谷成功登录只访问登录、验证码及身份页面，不读提交列表。QOJ 核验仅访问身份入口 `/`。
 
-由管理员完成两个登录流程并明确确认后再启用采集。启停以数据库为准，worker 最迟约 15 秒观察到变更，无需重启浏览器。再次迁移保留已有开关值；暂停期间已提交事实和游标保留。
+CF 可独立启用；需要 QOJ/洛谷时先完成相应登录和平台选择。启停以数据库为准，worker 最迟约 15 秒观察到变更，无需重启浏览器。再次迁移保留已有开关值；暂停期间已提交事实和游标保留。
 
 种子脚本创建 `test_member` 和 `test_empty`，不重置已有密码或绑定。前者默认候选为 CF `tourist`、洛谷 `863154`、QOJ `muhammad`；可通过 `--cf`、`--luogu`、`--qoj` 指定。测试密码从 `.secrets/member-test-password` 本地读取。候选仍须真实验证，不直接伪造已验证账号。
 
@@ -48,7 +48,7 @@ QOJ 复用容器内 Chromium 的默认 context，不恢复数据库 Cookie 到 C
 | `GET /api/me/platform-accounts` | 生效账号、当前候选和回填状态 |
 | `PUT /api/me/platform-accounts/:platform` | `{target}`，洛谷使用 UID；返回验证任务，已生效的已证实身份无变更 |
 | `DELETE /api/me/platform-accounts/:platform` | 解绑、取消旧任务并撤销全部个人历史归属 |
-| `POST /api/admin/sync` | `{accountIds?,platforms?,mode?,from?,to?}`；默认所有生效目标、增量模式、近 30 天；日期须同时提供，最多 366 天 |
+| `POST /api/admin/sync` | `{accountIds?,platforms?,mode?,from?,to?}`；默认所选平台的生效目标、增量模式及管理员区间；日期须同时提供，最多 366 天 |
 | `GET /api/admin/sync-jobs/:id` | 业务状态、队列状态、批次、页数、区间 `range`、`rangeComplete`、`stopReason` 与历史完整性 |
 | `POST /api/admin/sync-jobs/:id/retry` | 重试失败/暂停任务，从正式事实对应的游标续跑 |
 | `GET /api/leaderboard` | 个人积分、题数、分平台题数、最近首次 AC、并列排名 |
@@ -66,9 +66,9 @@ QOJ 复用容器内 Chromium 的默认 context，不恢复数据库 Cookie 到 C
 
 首次 AC 在全部有效历史里求最早，再过滤北京时间 UTC 半开区间。积分使用设计 v1 配置，规则版本为 `v1`；题目难度变化会改变历史区间积分。多人/队伍事实保存为未归属，不给查询成员计分。QOJ 队伍账号不允许个人绑定。
 
-默认批次最多 3 页、120 秒，成功后有界续投，无周期调度。逻辑运行 ID 不变，新批次独立 job ID 和 singleton key；提交游标是恢复依据，读取运行的诊断 continuation 不是业务游标。临时错误最多自动重试 3 次；登录/挑战暂停等待新的核验 generation，解析变化须修复后手动重试。
+默认批次最多 3 页、120 秒，成功后有界续投；周期调度见[管理员采集管理](管理员采集管理.md)。逻辑运行 ID 不变，新批次独立 job ID 和 singleton key；提交游标是恢复依据，读取运行的诊断 continuation 不是业务游标。临时错误最多自动重试 3 次；登录/挑战暂停等待新的核验 generation，解析变化须修复后手动重试。
 
-新绑定的首次采集默认只覆盖近 30 天。管理员可通过同步接口指定北京时间首尾日期，例如：
+新绑定首次采集使用管理员设置区间，初始默认近 30 天。管理员可通过同步接口指定单次北京时间首尾日期，例如：
 
 ```json
 {"accountIds":["已绑定的平台账号 UUID"],"mode":"incremental","from":"2026-09-01","to":"2026-09-30"}
@@ -92,7 +92,7 @@ docker compose run --rm --no-deps --entrypoint pnpm web personal:verify
 
 发布先备份数据库、停止旧 web/worker、执行迁移，再启动匹配镜像。保留 `acm-leaderboard_pgdata` 卷；禁止使用 `down -v` 清空数据。QOJ 用户完成登录后不再重建浏览器容器。
 
-需要在当前 Chromium 登录会话中更新 worker 时，先暂停采集并确认没有活动任务，只复制源码文件（不要复制 Windows 的 `node_modules`），完成迁移及离线测试后，可在 Linux Node 24 容器内使用 `scripts/worker-network-hot-apply.mjs --reload-worker`。该选项用 `execve` 原位替换 Node worker，保持 PID、Chromium、noVNC 及数据库卷；只开启并关闭容器内部本地调试连接，不发布新端口。脚本要求配置 `PLATFORM_HTTPS_PROXY`，适用于本机代理部署。后续正常镜像构建仍须包含更新后的源码。
+需要在当前 Chromium 登录会话中更新 worker 时，先暂停采集并确认没有活动任务，只复制源码文件（不要复制 Windows 的 `node_modules`），完成迁移及离线测试后，可在 Linux Node 24 容器内使用 `scripts/worker-network-hot-apply.mjs --reload-worker`。该选项用 `execve` 原位替换 Node worker，保持 PID、Chromium、noVNC 及数据库卷；只开启并关闭容器内部本地调试连接，不发布新端口。仅原位更新时保留进程原有网络设置；若同时配置 `PLATFORM_HTTPS_PROXY`，也会更新代理调度器。后续正常镜像构建仍须包含更新后的源码。
 
 本机 Docker 出网受限时可复用已安装依赖的镜像：
 

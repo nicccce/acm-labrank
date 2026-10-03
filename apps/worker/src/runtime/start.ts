@@ -1,4 +1,4 @@
-import { closeDb, createBoss, PROBE_QUEUE, writeWorkerHeartbeat, getPool, checkDatabaseReady, cleanCollectionHistory, getCollectionControl, expireLoginAttempts, maintainPersonalRuns, PLATFORM_READ_QUEUES, PERSONAL_QUEUES } from '@acm/db/server';
+import { closeDb, createBoss, dispatchDueCollection, PROBE_QUEUE, writeWorkerHeartbeat, getPool, checkDatabaseReady, cleanCollectionHistory, getCollectionControl, expireLoginAttempts, maintainPersonalRuns, PLATFORM_READ_QUEUES, PERSONAL_QUEUES } from '@acm/db/server';
 import { createQojReadWorker, getConfig, maintainReadQueue } from '@acm/core/server';
 import { qojHumanInput } from '../cli/qoj-human';
 import { registerPlatformQueues, registerPersonalQueues, registerSessionQueue } from './queues';
@@ -17,6 +17,7 @@ let stopping = false;
 let maintenanceRunning = false;
 let maintenanceTicks = 0;
 let collectionRegistered = false;
+let lastDispatchAt = 0;
 async function maintainCollection() {
   const enabled = (await getCollectionControl()).enabled;
   if (enabled && !collectionRegistered) {
@@ -28,6 +29,7 @@ async function maintainCollection() {
   }
   await expireLoginAttempts();
   if (enabled) { await maintainReadQueue(boss); await maintainPersonalRuns(boss); }
+  if (enabled && Date.now() - lastDispatchAt >= 60000) { await dispatchDueCollection(boss); lastDispatchAt = Date.now(); }
 }
 async function shutdown(code = 0) {
   if (stopping) return;
@@ -63,11 +65,10 @@ try {
         .catch(() => console.error(JSON.stringify({ code: 'READ_MAINTENANCE_FAILED' }))).finally(() => { maintenanceRunning = false; });
     }
   }, 15000);
-  // Only authentication recovery runs here; periodic synchronization is still separate.
   await getPool().query("DELETE FROM auth_rate_limits WHERE reset_at < now() - interval '1 day'");
   await getPool().query("DELETE FROM sessions WHERE expires_at < now() - interval '30 days'");
   await getPool().query("DELETE FROM runtime_heartbeats WHERE updated_at < now() - interval '1 day'");
-  console.log(JSON.stringify({ event: 'worker_ready', syncEnabled: config.SYNC_ENABLED === 'true', synchronizationImplemented: false }));
+  console.log(JSON.stringify({ event: 'worker_ready', synchronizationImplemented: true }));
 } catch {
   console.error(JSON.stringify({ code: 'WORKER_START_FAILED' }));
   await shutdown(1);

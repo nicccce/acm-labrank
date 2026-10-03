@@ -1,11 +1,13 @@
 import { z } from 'zod';
+import { queryMemberRank } from '@acm/db/server';
 import { ConnectorError, type AccountRef, type PlatformId } from '@acm/connectors/contracts';
-import { activateBinding, claimSyncRun, commitPersonalPage, ensureCollectionConnection, finishPersonalBatch, getBinding, getCollectionControl, getSyncRun, listBindings, listSyncTargets, memberProfile, queryCoverage, queryLeaderboard, queryLeaderboardCount, queryMemberRecords, queryMemberRecordCount, queryMemberStats, readSyncCursor, refreshVerifiedIdentity, requestPersonalSync, retryPersonalRun, saveBindingCandidate, seedIncrementalCheckpoint, unbindAccount, updateMemberName, type ReadQueueClient } from '@acm/db/server';
+import { activateBinding, assertPersonalRunAvailable, collectionAvailability, getCollectionSettings, claimSyncRun, commitPersonalPage, ensureCollectionConnection, finishPersonalBatch, getBinding, getCollectionControl, getSyncCursor, getSyncRun, listBindings, listSyncTargets, memberProfile, queryCoverage, queryLeaderboard, queryLeaderboardCount, queryMemberRecords, queryMemberRecordCount, queryMemberStats, readSyncCursor, refreshVerifiedIdentity, requestPersonalSync, retryPersonalRun, saveBindingCandidate, seedIncrementalCheckpoint, unbindAccount, updateMemberName, type CollectionSettings, type ReadQueueClient } from '@acm/db/server';
 import { CF_BANDS, LUOGU_POINTS, SCORING_VERSION, dateRange, displayName } from '../domain';
 import { AppError } from './errors';
 import { withReadQueue } from './collection/jobs';
 import { readPlatform, type ReadRuntimeOptions } from './collection/read';
 import { classifyReadFailure } from './collection/errors';
+import { collectionSettingsCall, collectionSkipMessages } from './collection/settings';
 
 const platforms = ['codeforces', 'luogu', 'qoj'] as const;
 export function personalPlatform(platform: string): PlatformId {
@@ -47,19 +49,28 @@ export async function deleteMemberBinding(userId: string, platform: PlatformId) 
 export async function requireCollectionEnabled() {
   if (!(await getCollectionControl()).enabled) throw new AppError('COLLECTION_PAUSED', '采集已暂停，请在完成登录验证后由管理员启用', 409);
 }
-export async function requestAdminSync(input: unknown) {
+export async function requestAdminSync(input: unknown, actorId?: string) {
   await requireCollectionEnabled();
   const parsed = z.object({ accountIds: z.array(z.uuid()).min(1).max(100).optional(), platforms: z.array(z.enum(platforms)).min(1).max(3).optional(), mode: z.enum(['incremental', 'backfill']).default('incremental'), from: z.string().optional(), to: z.string().optional() }).strict().safeParse(input);
   if (!parsed.success) throw new AppError('INVALID_INPUT', '同步目标参数不合法', 400);
-  const range = parsePersonalQuery(new URLSearchParams(parsed.data.from || parsed.data.to ? { ...(parsed.data.from ? { from: parsed.data.from } : {}), ...(parsed.data.to ? { to: parsed.data.to } : {}) } : {})).range;
-  const targets = await listSyncTargets(parsed.data.accountIds, parsed.data.platforms);
+  const settings = await getCollectionSettings();
+  const range = parsed.data.from || parsed.data.to ? parsePersonalQuery(new URLSearchParams({ ...(parsed.data.from ? { from: parsed.data.from } : {}), ...(parsed.data.to ? { to: parsed.data.to } : {}) }), new Date(), settings).range : undefined;
+  const selected = parsed.data.platforms ?? settings.platforms;
+  const targets = await listSyncTargets(parsed.data.accountIds, selected);
   return withReadQueue(async boss => {
     const items = [];
     for (const target of targets) {
-      try { items.push({ accountId: target.account_id, platform: target.platform, range: { from: range.from, to: range.to, timezone: range.timezone }, ...await personalCall(() => requestPersonalSync(target.id, parsed.data.mode, boss, { from: range.start, to: range.end })) }); }
+      const availability = await collectionAvailability(target.platform);
+      if (availability.reason) { items.push({ accountId: target.account_id, platform: target.platform, skipped: availability.reason, message: collectionSkipMessages[availability.reason] }); continue; }
+      try {
+        const result = await collectionSettingsCall(() => personalCall(() => requestPersonalSync(target.id, parsed.data.mode, boss, range ? { from: range.start, to: range.end } : undefined, 'manual', actorId)));
+        const run = (await getSyncRun(result.runId))!;
+        items.push({ accountId: target.account_id, platform: target.platform, range: run.range_from && run.range_to ? { from: new Date(run.range_from.getTime() + 8 * 3600000).toISOString().slice(0, 10), to: new Date(run.range_to.getTime() - 1 + 8 * 3600000).toISOString().slice(0, 10), timezone: 'Asia/Shanghai' } : null, ...result });
+      }
       catch (error) { items.push({ accountId: target.account_id, platform: target.platform, error: { code: error instanceof AppError ? error.code : 'SYNC_FAILED', message: '目标未入队，请重试' } }); }
     }
     for (const id of parsed.data.accountIds ?? []) if (!targets.some(t => t.account_id === id)) items.push({ accountId: id, error: { code: 'NOT_FOUND', message: '没有生效的目标绑定' } });
+    for (const platform of selected) if (!targets.some(t => t.platform === platform)) { const state = await collectionAvailability(platform); const skipped = state.reason ?? 'NO_ACTIVE_BINDING'; items.push({ platform, skipped, message: collectionSkipMessages[skipped] }); }
     return { items };
   });
 }
@@ -67,39 +78,41 @@ export async function adminSyncJob(id: string) {
   if (!z.uuid().safeParse(id).success) throw new AppError('INVALID_INPUT', '任务 ID 不合法', 400);
   const run = await getSyncRun(id); if (!run) throw new AppError('NOT_FOUND', '任务不存在', 404);
   const queueState = await withReadQueue(async boss => run.job_id ? (await boss.getJobById(run.queue, run.job_id))?.state ?? 'missing' : 'missing');
-  return { id: run.id, bindingId: run.binding_id, accountId: run.account_id, kind: run.kind, mode: run.mode, status: run.status, batch: run.batch, jobId: run.job_id, queueState, pages: run.pages, recordsWithOverlap: run.records, error: run.error, createdAt: run.created_at, finishedAt: run.finished_at,
+  return { id: run.id, bindingId: run.binding_id, accountId: run.account_id, kind: run.kind, mode: run.mode, source: run.source, status: run.status, batch: run.batch, jobId: run.job_id, queueState, pages: run.pages, recordsWithOverlap: run.records, error: run.error, createdAt: run.created_at, startedAt: run.started_at, finishedAt: run.finished_at,
     range: run.range_from && run.range_to ? { from: new Date(run.range_from.getTime() + 8 * 3600000).toISOString().slice(0, 10), to: new Date(run.range_to.getTime() - 1 + 8 * 3600000).toISOString().slice(0, 10), timezone: 'Asia/Shanghai' } : null, rangeComplete: run.range_complete, stopReason: run.stop_reason,
-    sync: run.account_id ? await readSyncCursor(run.account_id, run.mode) .then(c => ({ historyComplete: c.history_complete, coverage: c.coverage, lastSuccessAt: c.last_success_at })) : null };
+    sync: run.account_id ? await getSyncCursor(run.account_id, run.mode).then(c => c ? ({ historyComplete: c.history_complete, coverage: c.coverage, lastSuccessAt: c.last_success_at }) : null) : null };
 }
-export async function retryAdminSync(id: string) { await adminSyncJob(id); await requireCollectionEnabled(); return personalCall(() => withReadQueue(boss => retryPersonalRun(id, boss))); }
+export async function retryAdminSync(id: string) { await adminSyncJob(id); await requireCollectionEnabled(); return collectionSettingsCall(() => personalCall(() => withReadQueue(boss => retryPersonalRun(id, boss)))); }
 
 function pointsSql() {
   return `(CASE WHEN p.platform='codeforces' AND p.native_difficulty IS NOT NULL THEN CASE ${CF_BANDS.map(([boundary, points]) => `WHEN p.native_difficulty<${boundary} THEN ${points}`).join(' ')} ELSE 15 END WHEN p.platform='luogu' THEN CASE p.native_difficulty ${LUOGU_POINTS.map((points, i) => `WHEN ${i + 1} THEN ${points}`).join(' ')} ELSE 3 END ELSE 3 END)`;
 }
-export function parsePersonalQuery(params: URLSearchParams, now = new Date()) {
+export function parsePersonalQuery(params: URLSearchParams, now = new Date(), settings?: Pick<CollectionSettings, 'scoreRange' | 'platforms'>) {
   const parsed = z.object({ from: z.string().optional(), to: z.string().optional(), days: z.coerce.number().refine(n => n === 7 || n === 30).optional(), platform: z.enum(platforms).optional(), page: z.coerce.number().int().min(1).max(100000).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict().safeParse(Object.fromEntries(params));
   if (!parsed.success) throw new AppError('INVALID_INPUT', '日期、平台或分页参数不合法', 400);
   if ((parsed.data.from && !parsed.data.to) || (!parsed.data.from && parsed.data.to) || (parsed.data.days && parsed.data.from)) throw new AppError('INVALID_INPUT', '自定义日期须同时提供 from、to，并与 days 二选一', 400);
   let range: ReturnType<typeof dateRange>;
-  try { range = dateRange(parsed.data, now); } catch { throw new AppError('INVALID_INPUT', '日期无效或区间超过 366 天', 400); }
-  return { range, page: parsed.data.page, query: { from: range.start, to: range.end, platforms: parsed.data.platform ? [parsed.data.platform] : [...platforms], limit: parsed.data.limit, offset: (parsed.data.page - 1) * parsed.data.limit, pointsSql: pointsSql() } };
+  const defaults = settings?.scoreRange.kind === 'fixed' ? { from: settings.scoreRange.from, to: settings.scoreRange.to } : { days: settings?.scoreRange.kind === 'rolling' ? settings.scoreRange.days : 30 };
+  try { range = dateRange(parsed.data.from || parsed.data.days ? parsed.data : defaults, now); } catch { throw new AppError('INVALID_INPUT', '日期无效或区间超过 366 天', 400); }
+  const selected = settings?.platforms ?? [...platforms];
+  return { range, page: parsed.data.page, query: { from: range.start, to: range.end, platforms: parsed.data.platform ? selected.filter(p => p === parsed.data.platform) : selected, limit: parsed.data.limit, offset: (parsed.data.page - 1) * parsed.data.limit, pointsSql: pointsSql() } };
 }
-function queryMeta(parsed: ReturnType<typeof parsePersonalQuery>, coverage: Awaited<ReturnType<typeof queryCoverage>>) {
+export function queryMeta(parsed: ReturnType<typeof parsePersonalQuery>, coverage: Awaited<ReturnType<typeof queryCoverage>>) {
   return { ruleVersion: SCORING_VERSION, asOf: new Date().toISOString(), range: { from: parsed.range.from, to: parsed.range.to, timezone: parsed.range.timezone }, platforms: parsed.query.platforms, page: parsed.page, limit: parsed.query.limit, provisional: coverage.some(c => !c.historyComplete || c.coverage !== 'visible' || c.lastError), coverage };
 }
 export async function getPersonalLeaderboard(params: URLSearchParams) {
-  const parsed = parsePersonalQuery(params);
+  const parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
   const [rows, coverage] = await Promise.all([queryLeaderboard(parsed.query), queryCoverage(parsed.query.platforms)]);
   return { ...queryMeta(parsed, coverage), total: rows[0]?.total ?? await queryLeaderboardCount(), items: rows.map(r => ({ id: r.id, displayName: displayName(r), points: r.points, solveCount: r.solveCount, platformSolveCounts: r.platformSolveCounts, lastAcAt: r.lastAcAt, rank: r.rank })) };
 }
 export async function getPersonalMember(id: string, params: URLSearchParams) {
-  const member = await getMemberProfile(id), parsed = parsePersonalQuery(params);
-  const [stats, coverage] = await Promise.all([queryMemberStats(id, parsed.query), queryCoverage(parsed.query.platforms, id)]);
+  const member = await getMemberProfile(id), parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
+  const [stats, coverage, rank, bindings] = await Promise.all([queryMemberStats(id, parsed.query), queryCoverage(parsed.query.platforms, id), queryMemberRank(id, parsed.query), getMemberBindings(id)]);
   const perPlatform = parsed.query.platforms.map(platform => stats.platforms.find(p => p.platform === platform) ?? { platform, points: 0, solveCount: 0, lastAcAt: null });
-  return { ...queryMeta(parsed, coverage), member, points: perPlatform.reduce((n, p) => n + p.points, 0), solveCount: perPlatform.reduce((n, p) => n + p.solveCount, 0), submissionCount: stats.submissionCount, perPlatform, calendar: stats.calendar };
+  return { ...queryMeta(parsed, coverage), member, rank, platformAccounts: bindings.items.filter(b => b.active).map(b => ({ platform: b.platform, ...b.active! })), points: perPlatform.reduce((n, p) => n + p.points, 0), solveCount: perPlatform.reduce((n, p) => n + p.solveCount, 0), submissionCount: stats.submissionCount, perPlatform, calendar: stats.calendar };
 }
 export async function getPersonalRecords(id: string, params: URLSearchParams, raw: boolean) {
-  await getMemberProfile(id); const parsed = parsePersonalQuery(params);
+  await getMemberProfile(id); const parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
   const [rows, coverage] = await Promise.all([queryMemberRecords(id, parsed.query, raw), queryCoverage(parsed.query.platforms, id)]);
   return { ...queryMeta(parsed, coverage), total: rows[0]?.total ?? await queryMemberRecordCount(id, parsed.query, raw), items: rows.map(row => { const { total, ...dto } = row; void total; return dto; }) };
 }
@@ -109,6 +122,7 @@ export async function executePersonalJob(boss: ReadQueueClient, envelope: { sync
   const run = (await getSyncRun(envelope.syncRunId))!, binding = await getBinding(run.binding_id);
   try {
     await requireCollectionEnabled();
+    await collectionSettingsCall(() => assertPersonalRunAvailable(run.id));
     if (!binding || binding.version !== run.binding_version || (run.kind === 'sync' && binding.account_id !== run.account_id)) throw new Error('STALE_BINDING');
     // A crash after committing the terminal page must not restart the scan at the head.
     if (run.kind === 'sync' && run.stop_reason !== 'more') { await finishPersonalBatch(run.id, boss, { complete: true }); return { id: run.id, status: 'completed' }; }
@@ -119,18 +133,19 @@ export async function executePersonalJob(boss: ReadQueueClient, envelope: { sync
       if (run.kind === 'sync') {
         if (account.kind !== 'person' || account.externalId !== (binding.external_id ?? null)) throw new ConnectorError('ACCOUNT_AMBIGUOUS', '账号身份已变化，请重新验证绑定');
         if (accountKeyForCompare(binding.platform, account.handle) !== accountKeyForCompare(binding.platform, binding.handle!)) {
-          renamed = await refreshVerifiedIdentity(binding.id, binding.version, account);
+          renamed = await refreshVerifiedIdentity(binding.id, binding.version, account, run.id);
           if (renamed) throw new ConnectorError('LEASE_LOST', 'Confirmed handle rename requires a safe cursor restart');
         }
       }
     };
-    let cursor = run.account_id ? await readSyncCursor(run.account_id, run.mode) : null;
+    let cursor = run.account_id ? await readSyncCursor(run.account_id, run.mode, run.id) : null;
     if (!run.range_from && run.kind === 'sync' && run.mode === 'backfill' && cursor?.history_complete) { await finishPersonalBatch(run.id, boss, { complete: true }); return { id: run.id, status: 'completed' }; }
-    if (!run.range_from && run.mode === 'incremental' && run.account_id && !cursor?.checkpoint) { await seedIncrementalCheckpoint(run.account_id); cursor = await readSyncCursor(run.account_id, run.mode); }
+    if (!run.range_from && run.mode === 'incremental' && run.account_id && !cursor?.checkpoint) { await seedIncrementalCheckpoint(run.account_id, run.id); cursor = await readSyncCursor(run.account_id, run.mode, run.id); }
     const connectionId = binding.platform === 'codeforces' ? undefined : process.env[binding.platform === 'qoj' ? 'QOJ_CONNECTION_ID' : 'LUOGU_CONNECTION_ID'] ?? `${binding.platform}-lab`;
     const connection = connectionId ? await ensureCollectionConnection(connectionId, binding.platform) : null;
     let cursorVersion = run.range_from ? run.cursor_version : cursor?.version ?? 1;
-    const result = await readPlatform({ platform: binding.platform, target: run.kind === 'verify' ? binding.candidate : binding.handle, operation: run.kind === 'verify' ? 'resolve' : 'submissions', mode: run.mode, cursor: run.range_from ? run.scan_cursor : cursor?.cursor ?? null, checkpoint: run.range_from ? run.scan_checkpoint : cursor?.checkpoint ?? null, ...(run.range_from && run.range_to ? { range: { from: run.range_from.toISOString(), to: run.range_to.toISOString() } } : {}), maxPages: 3, maxDurationMs: 120000 }, { ...runtime, onAccount, onPage: async page => { cursorVersion = await commitPersonalPage(run.id, cursorVersion, page, connection ? { id: connection.id, generation: connection.generation } : undefined); } });
+    const beforeRequest = async () => { try { await assertPersonalRunAvailable(run.id); } catch (error) { throw new ConnectorError(error instanceof Error && error.message === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'CANCELLED', '采集设置、绑定或任务状态已变化'); } await runtime.beforeRequest?.(); };
+    const result = await readPlatform({ platform: binding.platform, target: run.kind === 'verify' ? binding.candidate : binding.handle, operation: run.kind === 'verify' ? 'resolve' : 'submissions', mode: run.mode, cursor: run.range_from ? run.scan_cursor : cursor?.cursor ?? null, checkpoint: run.range_from ? run.scan_checkpoint : cursor?.checkpoint ?? null, ...(run.range_from && run.range_to ? { range: { from: run.range_from.toISOString(), to: run.range_to.toISOString() } } : {}), maxPages: 3, maxDurationMs: 120000 }, { ...runtime, beforeRequest, onAccount, onPage: async page => { cursorVersion = await commitPersonalPage(run.id, cursorVersion, page, connection ? { id: connection.id, generation: connection.generation } : undefined); } });
     if (renamed) { await finishPersonalBatch(run.id, boss, {}); }
     else if (result.status === 'completed') {
       if (run.kind === 'verify') { if (!resolved || !result.account) throw new Error('UNRESOLVED_ACCOUNT'); await activateBinding(run.id, result.account, boss); }
@@ -146,7 +161,8 @@ export async function executePersonalJob(boss: ReadQueueClient, envelope: { sync
     const code = error instanceof Error ? error.message : 'SYNC_FAILED';
     const candidateState = code === 'ACCOUNT_OCCUPIED' ? 'occupied' : code === 'TEAM_ACCOUNT_UNSUPPORTED' ? 'unsupported' : 'unavailable';
     const classified = error instanceof ConnectorError ? classifyReadFailure(error, binding?.platform ?? 'codeforces').error : { code: error instanceof AppError ? error.code : ['STALE_BINDING', 'STALE_CURSOR', 'STALE_CONNECTION', 'ACCOUNT_OCCUPIED', 'TEAM_ACCOUNT_UNSUPPORTED', 'COLLECTION_PAUSED'].includes(code) ? code : 'SYNC_FAILED', message: '同步未完成，已提交页面保留', action: 'retry' };
-    await finishPersonalBatch(run.id, boss, { error: classified, paused: classified.code === 'COLLECTION_PAUSED', candidateState: run.kind === 'verify' ? candidateState : undefined });
+    if (classified.code === 'AUTH_REQUIRED') classified.action = 'reauthenticate';
+    await finishPersonalBatch(run.id, boss, { error: classified, paused: classified.code === 'COLLECTION_PAUSED' || ['reauthenticate', 'human_verify', 'fix_parser'].includes(classified.action), candidateState: run.kind === 'verify' ? candidateState : undefined });
     return { id: run.id, status: 'failed' };
   }
 }

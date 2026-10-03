@@ -30,7 +30,7 @@ try {
   await page.goto('http://localhost:3000/admin/connections');
   await page.getByLabel('用户名').fill(username); await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click(); await page.waitForURL('http://localhost:3000/');
-  await page.getByRole('link', { name: '管理平台登录与采集' }).click();
+  await page.getByRole('link', { name: '管理平台登录' }).click();
   await page.getByRole('heading', { name: '平台采集连接', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '获取验证码', exact: true }).isDisabled(), true);
   const iframe = page.locator('iframe[title="QOJ 专用浏览器远程桌面"]');

@@ -207,9 +207,9 @@ export async function createQojBrowserRequestContext(options: { connectionId: st
     // new script must not clear its cookies or replay a database snapshot.
     const keepBrowserSession = Boolean(options.cdpEndpoint) || options.keepBrowserSession === true;
     let importHeader = options.cookieHeader;
-    const scopedContext = (signal: AbortSignal, expectedGeneration?: number) => {
+    const scopedContext = (signal: AbortSignal, expectedGeneration?: number, beforeRequest?: () => Promise<void>) => {
       let generation = expectedGeneration;
-      return createRequestContext({ platform: 'qoj', signal, store: options.memoryStore, allowedMethods: ['GET', 'POST'], fetchImpl: transport.fetchImpl,
+      return createRequestContext({ platform: 'qoj', signal, beforeRequest, store: options.memoryStore, allowedMethods: ['GET', 'POST'], fetchImpl: transport.fetchImpl,
       timeoutMs: options.timeoutMs, leaseMs: Math.max(45000, (options.timeoutMs ?? 30000) + 15000), maxRetries: options.maxRetries,
       minIntervalMs: Math.max(1000, Number(process.env.QOJ_MIN_INTERVAL_MS ?? 3000)), maxResponseBytes: maxBytes,
       sessionHooks: {

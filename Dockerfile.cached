@@ -1,6 +1,5 @@
 # Local recovery build: use already-installed dependencies only with an identical lockfile.
 # Clean installations continue to use Dockerfile.
-ARG APP_CACHE_IMAGE=acm-leaderboard:cache-app
 ARG BROWSER_CACHE_IMAGE=acm-leaderboard:cache-browser
 FROM ${BROWSER_CACHE_IMAGE} AS build
 USER root
@@ -8,16 +7,23 @@ WORKDIR /app
 RUN cp pnpm-lock.yaml /tmp/cached-pnpm-lock.yaml
 COPY . .
 RUN cmp pnpm-lock.yaml /tmp/cached-pnpm-lock.yaml && pnpm typecheck && pnpm build
+# Dependencies already exist in both cache images with this exact lockfile.
+# Copy only application files into a fresh layer instead of duplicating the
+# dependency tree and Next build cache on every local verification build.
+RUN mkdir /tmp/application && tar --exclude='./node_modules' --exclude='*/node_modules' --exclude='./apps/web/.next/cache' -cf - . | tar -xf - -C /tmp/application
 
-FROM ${APP_CACHE_IMAGE} AS runtime
+# Reuse the same verified dependency tree in both targets. The older app cache
+# may have a different workspace install state even with matching versions.
+FROM ${BROWSER_CACHE_IMAGE} AS runtime
 USER root
-COPY --from=build --chown=node:node /app /app
+COPY --from=build --chown=node:node /tmp/application /app
 USER node
+ENTRYPOINT []
 CMD ["pnpm", "--filter", "@acm/web", "start"]
 
 FROM ${BROWSER_CACHE_IMAGE} AS worker-browser
 USER root
-COPY --from=build --chown=node:node /app /app
+COPY --from=build --chown=node:node /tmp/application /app
 USER node
 ENTRYPOINT ["node", "scripts/qoj-container.mjs"]
 CMD ["pnpm", "--filter", "@acm/worker", "start"]

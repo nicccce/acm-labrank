@@ -65,6 +65,7 @@ export async function api(handler: () => Promise<NextResponse>) {
       message: known ? error.message : '服务暂不可用，请稍后重试',
       requestId,
       ...(known && error.retryAt ? { retryAt: error.retryAt } : {}),
+      ...(known && error.teamId ? { teamId: error.teamId } : {}),
     }, { status: known ? error.status : 500, headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId } });
   }
 }

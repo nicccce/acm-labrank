@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { getConnector } from '@acm/connectors/server';
 import { ConnectorError, type PlatformId } from '@acm/connectors/contracts';
 import { platforms, isPlatformId } from '@acm/connectors/metadata';
-import { getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy, getCollectionControl, setCollectionControl, disconnectCollectionConnection } from '@acm/db/server';
+import { dispatchDueCollection, getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy, getCollectionControl, setCollectionControl, disconnectCollectionConnection } from '@acm/db/server';
 import { AppError } from '../errors';
-import { requestPlatformRead, retryPlatformRead } from './jobs';
+import { requestPlatformRead, retryPlatformRead, withReadQueue } from './jobs';
 import { requireCollectionEnabled } from '../personal';
 
 export const adminRunIdSchema = z.uuid();
@@ -81,7 +81,9 @@ export async function changeAdminCollectionControl(input: unknown, actorId: stri
   if (!parsed.success) throw new AppError('INVALID_INPUT', '采集开关参数不合法', 400);
   await getCollectionControl();
   const value = await setCollectionControl(parsed.data.enabled, parsed.data.version, actorId);
-  if (!value) throw new AppError('VERSION_CONFLICT', '采集开关已变化，请刷新', 409); return value;
+  if (!value) throw new AppError('VERSION_CONFLICT', '采集开关已变化，请刷新', 409);
+  if (value.enabled) await withReadQueue(boss => dispatchDueCollection(boss));
+  return value;
 }
 export async function requestAdminSessionVerification(platform: string, actorId: string) {
   if (platform !== 'qoj') throw new AppError('NOT_IMPLEMENTED', '洛谷请使用验证码登录', 422);

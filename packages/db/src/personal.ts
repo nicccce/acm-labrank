@@ -2,21 +2,17 @@ import type { PoolClient } from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { getPool } from './client';
 import { PERSONAL_QUEUES } from './queue';
+import { assertCollectionAvailable, collectionAvailability, collectionTransaction as transaction, configuredSyncRange, getCollectionSettings, type SyncSource } from './collection/settings';
 
 export type PersonalPlatform = keyof typeof PERSONAL_QUEUES;
 export interface BindingRow { id: string; user_id: string; platform: PersonalPlatform; account_id: string | null; candidate: string | null; candidate_state: string | null; candidate_error: string | null; version: number; handle?: string; external_id?: string | null }
-export interface SyncRow { id: string; binding_id: string; binding_version: number; account_id: string | null; kind: 'verify' | 'sync'; mode: 'backfill' | 'incremental'; status: string; batch: number; job_id: string | null; queue: string; pages: number; records: number; retries: number; error: unknown; created_at: Date; finished_at: Date | null; range_from: Date | null; range_to: Date | null; scan_cursor: CursorRow['cursor']; scan_checkpoint: CursorRow['checkpoint']; cursor_version: number; stop_reason: string; range_complete: boolean }
+export interface SyncRow { id: string; binding_id: string; binding_version: number; account_id: string | null; kind: 'verify' | 'sync'; mode: 'backfill' | 'incremental'; status: string; batch: number; job_id: string | null; queue: string; pages: number; records: number; retries: number; error: unknown; created_at: Date; finished_at: Date | null; started_at: Date | null; collection_generation: number; source: SyncSource; requested_by: string | null; range_from: Date | null; range_to: Date | null; scan_cursor: CursorRow['cursor']; scan_checkpoint: CursorRow['checkpoint']; cursor_version: number; stop_reason: string; range_complete: boolean }
 export interface PersonalSyncRange { from: Date; to: Date }
 export function defaultPersonalSyncRange(now = new Date()): PersonalSyncRange {
   const midnight = Math.floor((now.getTime() + 8 * 3600000) / 86400000) * 86400000 - 8 * 3600000;
   return { from: new Date(midnight - 29 * 86400000), to: new Date(midnight + 86400000) };
 }
 export interface CursorRow { id: string; cursor: { version: number; data: unknown } | null; checkpoint: { version: number; data: unknown } | null; version: number; history_complete: boolean; coverage: string; last_success_at: Date | null }
-async function transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
-  try { await client.query('BEGIN'); const value = await fn(client); await client.query('COMMIT'); return value; }
-  catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
-}
 export const accountKey = (platform: string, handle: string) => platform === 'codeforces' ? handle.toLowerCase() : handle;
 export async function memberProfile(id: string) {
   return (await getPool().query<{ id: string; username: string; realName: string | null; verifiedCfHandle: string | null; role: 'member' | 'admin' }>(`SELECT u.id,u.username,u.real_name AS "realName",u.role,a.handle AS "verifiedCfHandle" FROM users u LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE u.id=$1 AND u.active`, [id])).rows[0] ?? null;
@@ -34,16 +30,21 @@ async function sendRun(client: PoolClient, boss: PgBoss, run: Pick<SyncRow, 'id'
   if (!id) throw new Error('SYNC_QUEUE_CONFLICT');
   await client.query('UPDATE sync_runs SET job_id=$2 WHERE id=$1', [run.id, id]); return id;
 }
-async function enqueueInTransaction(client: PoolClient, boss: PgBoss, binding: BindingRow, kind: 'verify' | 'sync', mode: 'incremental' | 'backfill', range = kind === 'sync' ? defaultPersonalSyncRange() : null) {
-  const old = (await client.query<SyncRow>("SELECT * FROM sync_runs WHERE binding_id=$1 AND kind=$2 AND mode=$3 AND status IN ('queued','running') FOR UPDATE", [binding.id, kind, mode])).rows[0];
+export async function enqueuePersonalInTransaction(client: PoolClient, boss: PgBoss, binding: BindingRow, kind: 'verify' | 'sync', mode: 'incremental' | 'backfill', range?: PersonalSyncRange | null, source: SyncSource = 'binding', actorId?: string) {
+  const generation = await assertCollectionAvailable(binding.platform, undefined, client);
+  const explicitRange = range != null;
+  range = kind === 'verify' ? null : range ?? configuredSyncRange(await getCollectionSettings(client));
+  // Incremental and backfill cannot run against the same account simultaneously.
+  const old = (await client.query<SyncRow>("SELECT * FROM sync_runs WHERE binding_id=$1 AND status IN ('queued','running') FOR UPDATE", [binding.id])).rows[0];
   if (old) {
-    if (old.range_from?.getTime() !== range?.from.getTime() || old.range_to?.getTime() !== range?.to.getTime()) throw new Error('SYNC_RANGE_CONFLICT');
+    if (explicitRange && old.kind === kind && (old.range_from?.getTime() !== range?.from.getTime() || old.range_to?.getTime() !== range?.to.getTime())) throw new Error('SYNC_RANGE_CONFLICT');
     return { runId: old.id, jobId: old.job_id, merged: true };
   }
   const queue = PERSONAL_QUEUES[binding.platform];
   // An expanded earlier interval must scan from the head without the old stop checkpoint.
-  const previous = range && mode === 'incremental' ? (await client.query<SyncRow>(`SELECT * FROM sync_runs WHERE binding_id=$1 AND binding_version=$2 AND account_id=$3 AND status='completed' AND range_complete AND scan_checkpoint IS NOT NULL AND range_from<=$4 AND (range_to>=$5 OR (range_to>=created_at AND range_to>=$4)) ORDER BY finished_at DESC LIMIT 1`, [binding.id, binding.version, binding.account_id, range.from, range.to])).rows[0] : null;
-  const run = (await client.query<SyncRow>(`INSERT INTO sync_runs(binding_id,binding_version,account_id,kind,mode,queue,range_from,range_to,scan_checkpoint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [binding.id, binding.version, binding.account_id, kind, mode, queue, range?.from ?? null, range?.to ?? null, previous?.scan_checkpoint ? JSON.stringify(previous.scan_checkpoint) : null])).rows[0]!;
+  const previous = range && mode === 'incremental' ? (await client.query<SyncRow>(`SELECT * FROM sync_runs WHERE binding_id=$1 AND binding_version=$2 AND account_id=$3 AND status='completed' AND collection_generation=$6 AND range_complete AND scan_checkpoint IS NOT NULL AND range_from<=$4 AND (range_to>=$5 OR (range_to>=created_at AND range_to>=$4)) ORDER BY finished_at DESC LIMIT 1`, [binding.id, binding.version, binding.account_id, range.from, range.to, generation])).rows[0] : null;
+  const run = (await client.query<SyncRow>(`INSERT INTO sync_runs(binding_id,binding_version,account_id,kind,mode,queue,range_from,range_to,scan_checkpoint,collection_generation,source,requested_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [binding.id, binding.version, binding.account_id, kind, mode, queue, range?.from ?? null, range?.to ?? null, previous?.scan_checkpoint ? JSON.stringify(previous.scan_checkpoint) : null, generation, source, actorId ?? null])).rows[0]!;
+  await client.query('UPDATE platform_bindings SET next_sync_at=NULL,sync_blocked=NULL,sync_requested=false WHERE id=$1', [binding.id]);
   const jobId = await sendRun(client, boss, run); return { runId: run.id, jobId, merged: false };
 }
 export async function saveBindingCandidate(userId: string, platform: PersonalPlatform, target: string, boss: PgBoss) {
@@ -56,7 +57,9 @@ export async function saveBindingCandidate(userId: string, platform: PersonalPla
     if (occupied.rowCount) throw new Error('ACCOUNT_OCCUPIED');
     await client.query("UPDATE sync_runs SET status='cancelled',finished_at=now() WHERE binding_id IN (SELECT id FROM platform_bindings WHERE user_id=$1 AND platform=$2) AND status IN ('queued','running','paused','failed')", [userId, platform]);
     const binding = (await client.query<BindingRow>(`INSERT INTO platform_bindings(user_id,platform,candidate,candidate_state) VALUES ($1,$2,$3,'pending') ON CONFLICT(user_id,platform) DO UPDATE SET candidate=$3,candidate_state='pending',candidate_error=NULL,version=platform_bindings.version+1 RETURNING *`, [userId, platform, target])).rows[0]!;
-    return { bindingId: binding.id, version: binding.version, state: 'pending', ...await enqueueInTransaction(client, boss, binding, 'verify', 'backfill') };
+    const available = await collectionAvailability(platform, client);
+    if (available.reason) { await client.query('UPDATE platform_bindings SET sync_requested=true,next_sync_at=now() WHERE id=$1', [binding.id]); return { bindingId: binding.id, version: binding.version, state: 'pending', runId: null, jobId: null, merged: false, skipped: available.reason }; }
+    return { bindingId: binding.id, version: binding.version, state: 'pending', ...await enqueuePersonalInTransaction(client, boss, binding, 'verify', 'backfill') };
   });
 }
 async function rebuildAttributions(client: PoolClient, platform: string) {
@@ -80,6 +83,7 @@ export async function activateBinding(runId: string, account: { platform: string
     const run = (await client.query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1 FOR UPDATE', [runId])).rows[0]!;
     const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version || run.status !== 'running') throw new Error('STALE_BINDING');
+    await assertCollectionAvailable(binding.platform, run.collection_generation, client);
     if (account.kind !== 'person') throw new Error('TEAM_ACCOUNT_UNSUPPORTED');
     const identity = account.externalId ?? accountKey(account.platform, account.handle);
     const aliases = [...new Set([...(account.platform === 'luogu' ? [] : [accountKey(account.platform, account.handle)]), ...(account.externalId ? [account.externalId] : []), ...(account.resolutionEvidence?.historicHandlesChecked ? [accountKey(account.platform, account.resolutionEvidence.requestedHandle)] : [])])];
@@ -95,28 +99,37 @@ export async function activateBinding(runId: string, account: { platform: string
     await rebuildAttributions(client, binding.platform);
     await client.query("UPDATE sync_runs SET status='completed',account_id=$2,finished_at=now() WHERE id=$1", [runId, accountId]);
     binding.account_id = accountId;
-    return enqueueInTransaction(client, boss, binding, 'sync', 'backfill');
+    return enqueuePersonalInTransaction(client, boss, binding, 'sync', 'backfill');
   });
 }
 export async function unbindAccount(userId: string, platform: string) {
   await transaction(async client => {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,73192405))', [`${userId}:${platform}`]);
-    await client.query('UPDATE platform_bindings SET account_id=NULL,candidate=NULL,candidate_state=NULL,candidate_error=NULL,version=version+1 WHERE user_id=$1 AND platform=$2', [userId, platform]);
+    await client.query('UPDATE platform_bindings SET account_id=NULL,candidate=NULL,candidate_state=NULL,candidate_error=NULL,version=version+1,next_sync_at=NULL,sync_requested=false,sync_blocked=NULL WHERE user_id=$1 AND platform=$2', [userId, platform]);
     await client.query("UPDATE sync_runs SET status='cancelled',finished_at=now() WHERE binding_id IN (SELECT id FROM platform_bindings WHERE user_id=$1 AND platform=$2) AND status IN ('queued','running','paused','failed')", [userId, platform]);
     await rebuildAttributions(client, platform);
   });
 }
-export async function requestPersonalSync(bindingId: string, mode: 'backfill' | 'incremental', boss: PgBoss, range = defaultPersonalSyncRange()) {
+export async function requestPersonalSync(bindingId: string, mode: 'backfill' | 'incremental', boss: PgBoss, range?: PersonalSyncRange, source: SyncSource = 'manual', actorId?: string) {
   return transaction(async client => {
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended(user_id::text||':'||platform,73192405)) FROM platform_bindings WHERE id=$1`, [bindingId]);
     const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 AND b.account_id IS NOT NULL FOR UPDATE OF b', [bindingId])).rows[0];
     if (!binding) throw new Error('NO_ACTIVE_BINDING');
-    return enqueueInTransaction(client, boss, binding, 'sync', mode, range);
+    const result = await enqueuePersonalInTransaction(client, boss, binding, 'sync', mode, range, source, actorId);
+    if (actorId) await client.query("INSERT INTO collection_audit_logs(actor_id,action,target,details) VALUES ($1,'sync_requested',$2,$3)", [actorId, binding.id, JSON.stringify({ ...result, source, mode })]);
+    return result;
   });
 }
-export async function refreshVerifiedIdentity(bindingId: string, version: number, account: { platform: string; kind: string; handle: string; externalId: string | null; resolutionEvidence?: { requestedHandle: string; historicHandlesChecked: boolean } }) {
+async function assertRunCollection(client: PoolClient, id: string, accountId?: string) {
+  const row = (await client.query<{ platform: string; collection_generation: number; account_id: string | null }>(`SELECT b.platform,r.collection_generation,r.account_id FROM sync_runs r JOIN platform_bindings b ON b.id=r.binding_id JOIN users u ON u.id=b.user_id AND u.active
+    WHERE r.id=$1 AND r.status='running' AND r.binding_version=b.version AND r.account_id IS NOT DISTINCT FROM b.account_id`, [id])).rows[0];
+  if (!row || (accountId !== undefined && row.account_id !== accountId)) throw new Error('STALE_COLLECTION');
+  await assertCollectionAvailable(row.platform, row.collection_generation, client);
+}
+export async function refreshVerifiedIdentity(bindingId: string, version: number, account: { platform: string; kind: string; handle: string; externalId: string | null; resolutionEvidence?: { requestedHandle: string; historicHandlesChecked: boolean } }, runId?: string) {
   return transaction(async client => {
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended(user_id::text||':'||platform,73192405)) FROM platform_bindings WHERE id=$1`, [bindingId]);
+    if (runId) await assertRunCollection(client, runId);
     const binding = (await client.query<BindingRow>('SELECT b.*,a.handle,a.external_id FROM platform_bindings b JOIN platform_accounts a ON a.id=b.account_id WHERE b.id=$1 FOR UPDATE OF b,a', [bindingId])).rows[0];
     if (!binding || binding.version !== version || binding.platform !== account.platform || account.kind !== 'person' || account.externalId !== binding.external_id) throw new Error('STALE_BINDING');
     if (accountKey(account.platform, account.handle) === accountKey(binding.platform, binding.handle!)) return false;
@@ -137,14 +150,23 @@ export async function refreshVerifiedIdentity(bindingId: string, version: number
 }
 export async function getSyncRun(id: string): Promise<SyncRow | null> { return (await getPool().query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1', [id])).rows[0] ?? null; }
 export async function claimSyncRun(id: string, batch: number, jobId: string) {
-  return (await getPool().query("UPDATE sync_runs SET status='running' WHERE id=$1 AND batch=$2 AND job_id=$3 AND status='queued' RETURNING id", [id, batch, jobId])).rowCount === 1;
+  return (await getPool().query("UPDATE sync_runs SET status='running',started_at=coalesce(started_at,now()) WHERE id=$1 AND batch=$2 AND job_id=$3 AND status='queued' RETURNING id", [id, batch, jobId])).rowCount === 1;
 }
-export async function readSyncCursor(accountId: string, mode: 'backfill' | 'incremental'): Promise<CursorRow> {
-  await getPool().query('INSERT INTO sync_cursors(account_id,mode) VALUES ($1,$2) ON CONFLICT DO NOTHING', [accountId, mode]);
-  return (await getPool().query<CursorRow>('SELECT * FROM sync_cursors WHERE account_id=$1 AND mode=$2', [accountId, mode])).rows[0]!;
+export async function getSyncCursor(accountId: string, mode: 'backfill' | 'incremental'): Promise<CursorRow | null> {
+  return (await getPool().query<CursorRow>('SELECT * FROM sync_cursors WHERE account_id=$1 AND mode=$2', [accountId, mode])).rows[0] ?? null;
 }
-export async function seedIncrementalCheckpoint(accountId: string) {
-  await getPool().query(`INSERT INTO sync_cursors(account_id,mode,checkpoint) SELECT account_id,'incremental',checkpoint FROM sync_cursors WHERE account_id=$1 AND mode='backfill' ON CONFLICT(account_id,mode) DO UPDATE SET checkpoint=EXCLUDED.checkpoint WHERE sync_cursors.checkpoint IS NULL AND sync_cursors.cursor IS NULL`, [accountId]);
+export async function readSyncCursor(accountId: string, mode: 'backfill' | 'incremental', runId?: string): Promise<CursorRow> {
+  return transaction(async client => {
+    if (runId) { await lockRunBinding(client, runId); await assertRunCollection(client, runId, accountId); }
+    await client.query('INSERT INTO sync_cursors(account_id,mode) VALUES ($1,$2) ON CONFLICT DO NOTHING', [accountId, mode]);
+    return (await client.query<CursorRow>('SELECT * FROM sync_cursors WHERE account_id=$1 AND mode=$2', [accountId, mode])).rows[0]!;
+  });
+}
+export async function seedIncrementalCheckpoint(accountId: string, runId?: string) {
+  await transaction(async client => {
+    if (runId) { await lockRunBinding(client, runId); await assertRunCollection(client, runId, accountId); }
+    await client.query(`INSERT INTO sync_cursors(account_id,mode,checkpoint) SELECT account_id,'incremental',checkpoint FROM sync_cursors WHERE account_id=$1 AND mode='backfill' ON CONFLICT(account_id,mode) DO UPDATE SET checkpoint=EXCLUDED.checkpoint WHERE sync_cursors.checkpoint IS NULL AND sync_cursors.cursor IS NULL`, [accountId]);
+  });
 }
 export interface FactPage {
   problems: { platform: string; problemKey: string; title: string; nativeDifficulty: number | null; difficultyObserved?: boolean; sourceUrl: string; observedAt?: string }[];
@@ -157,6 +179,7 @@ export async function commitPersonalPage(runId: string, expectedCursorVersion: n
     const run = (await client.query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1 FOR UPDATE', [runId])).rows[0]!;
     const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version || binding.account_id !== run.account_id || run.status !== 'running') throw new Error('STALE_BINDING');
+    await assertCollectionAvailable(binding.platform, run.collection_generation, client);
     const enabled = await client.query('SELECT 1 FROM collection_control WHERE id=1 AND enabled FOR SHARE');
     if (!enabled.rowCount) throw new Error('COLLECTION_PAUSED');
     if (connection && !(await client.query('SELECT 1 FROM platform_connections WHERE id=$1 AND generation=$2 FOR SHARE', [connection.id, connection.generation])).rowCount) throw new Error('STALE_CONNECTION');
@@ -194,7 +217,11 @@ export async function finishPersonalBatch(id: string, boss: PgBoss, options: { c
     if (run.status !== 'running') return;
     if (options.candidateState) await client.query('UPDATE platform_bindings SET candidate_state=$3,candidate_error=$4 WHERE id=$1 AND version=$2', [run.binding_id, run.binding_version, options.candidateState, JSON.stringify(options.error)]);
     if (options.complete || options.paused || (options.error && options.retryDelay === undefined)) {
-      await client.query('UPDATE sync_runs SET status=$2,error=$3,finished_at=now() WHERE id=$1', [id, options.complete ? 'completed' : options.paused ? 'paused' : 'failed', options.error ? JSON.stringify(options.error) : null]); return;
+      await client.query('UPDATE sync_runs SET status=$2,error=$3,finished_at=now() WHERE id=$1', [id, options.complete ? 'completed' : options.paused ? 'paused' : 'failed', options.error ? JSON.stringify(options.error) : null]);
+      const code = options.error && typeof options.error === 'object' && 'code' in options.error ? String(options.error.code) : 'SYNC_FAILED';
+      if (options.complete && run.kind === 'sync') await client.query('UPDATE platform_bindings SET next_sync_at=now()+(SELECT sync_interval_minutes FROM collection_settings WHERE id=1)*interval \'1 minute\',sync_blocked=NULL,sync_requested=sync_requested OR (candidate IS NOT NULL AND candidate_state=\'pending\') WHERE id=$1 AND version=$2', [run.binding_id, run.binding_version]);
+      else if (!options.complete) await client.query('UPDATE platform_bindings SET next_sync_at=NULL,sync_blocked=$3 WHERE id=$1 AND version=$2', [run.binding_id, run.binding_version, code]);
+      return;
     }
     run.batch++;
     await client.query("UPDATE sync_runs SET status='queued',batch=$2,error=$3,retries=retries+$4 WHERE id=$1", [id, run.batch, options.error ? JSON.stringify(options.error) : null, options.error ? 1 : 0]);
@@ -208,7 +235,8 @@ export async function retryPersonalRun(id: string, boss: PgBoss, resetRetries = 
     if (!run || !['failed', 'paused'].includes(run.status)) throw new Error('SYNC_STATE_CONFLICT');
     const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version) throw new Error('STALE_BINDING');
-    const active = (await client.query<SyncRow>("SELECT * FROM sync_runs WHERE binding_id=$1 AND kind=$2 AND mode=$3 AND status IN ('queued','running')", [run.binding_id, run.kind, run.mode])).rows[0];
+    await assertCollectionAvailable(binding.platform, run.collection_generation, client);
+    const active = (await client.query<SyncRow>("SELECT * FROM sync_runs WHERE binding_id=$1 AND kind=$2 AND status IN ('queued','running')", [run.binding_id, run.kind])).rows[0];
     if (active) {
       if (active.range_from?.getTime() !== run.range_from?.getTime() || active.range_to?.getTime() !== run.range_to?.getTime()) throw new Error('SYNC_RANGE_CONFLICT');
       return { runId: active.id, jobId: active.job_id, merged: true };
@@ -216,6 +244,7 @@ export async function retryPersonalRun(id: string, boss: PgBoss, resetRetries = 
     run.batch++;
     await client.query("UPDATE sync_runs SET status='queued',batch=$2,error=NULL,retries=$3,finished_at=NULL WHERE id=$1", [id, run.batch, resetRetries ? 0 : run.retries + 1]);
     if (run.kind === 'verify') await client.query("UPDATE platform_bindings SET candidate_state='pending',candidate_error=NULL WHERE id=$1", [run.binding_id]);
+    await client.query('UPDATE platform_bindings SET sync_blocked=NULL,next_sync_at=NULL WHERE id=$1', [run.binding_id]);
     return { runId: id, jobId: await sendRun(client, boss, run), merged: false };
   });
 }
@@ -226,6 +255,7 @@ export async function maintainPersonalRuns(boss: PgBoss) {
     if (!job || ['failed', 'cancelled', 'completed'].includes(job.state)) {
       const changed = await getPool().query("UPDATE sync_runs SET status='paused',error=$2,finished_at=now() WHERE id=$1 AND job_id=$3 AND status IN ('queued','running') RETURNING id", [run.id, JSON.stringify({ code: 'INTERRUPTED', action: 'retry', message: '任务中断，已提交页面和游标保留' }), run.job_id]);
       if (changed.rowCount && job?.state !== 'cancelled' && run.retries < 3) await retryPersonalRun(run.id, boss, false).catch(() => undefined);
+      else if (changed.rowCount) await getPool().query("UPDATE platform_bindings SET next_sync_at=NULL,sync_blocked='INTERRUPTED' WHERE id=$1 AND version=$2", [run.binding_id, run.binding_version]);
     }
   }
   const recoverable = (await getPool().query<{ id: string }>(`SELECT r.id FROM sync_runs r JOIN platform_bindings b ON b.id=r.binding_id JOIN platform_connections c ON c.platform=b.platform AND c.id=CASE WHEN b.platform='qoj' THEN $1 ELSE $2 END WHERE r.status='paused' AND r.error->>'code' IN ('AUTH_REQUIRED','CHALLENGE_REQUIRED','RISK_CONTROL') AND c.state='ready' AND c.generation>coalesce((r.error->>'connectionGeneration')::int,-1) AND b.version=r.binding_version LIMIT 50`, [process.env.QOJ_CONNECTION_ID ?? 'qoj-lab', process.env.LUOGU_CONNECTION_ID ?? 'luogu-lab'])).rows;

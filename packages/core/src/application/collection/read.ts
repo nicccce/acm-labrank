@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ConnectorError, type ConnectorErrorCode, type PlatformReadOutcome, type RequestContext, type SubmissionPage } from '@acm/connectors/contracts';
 import { getConnector, luoguLogin } from '@acm/connectors/server';
-import { createDirectReadRun, ensureCollectionConnection, finishReadRun, getReadRun, getCollectionControl, markReadingPermission, setCollectionConnectionFailure, startReadRun, verifyCollectionConnection, writeReadGeneration, writeReadProgress, type CollectionConnection } from '@acm/db/server';
+import { collectionAvailability, createDirectReadRun, ensureCollectionConnection, finishReadRun, getReadRun, getCollectionControl, markReadingPermission, setCollectionConnectionFailure, startReadRun, verifyCollectionConnection, writeReadGeneration, writeReadProgress, type CollectionConnection } from '@acm/db/server';
 import { createCodeforcesReadContext } from '../platforms/codeforces/read';
 import { createLuoguRequestContext } from '../platforms/luogu/session';
 import type { createQojReadWorker } from '../platforms/qoj/worker';
@@ -16,6 +16,7 @@ export interface ReadRuntimeOptions {
   context?: RequestContext;
   onPage?: (page: SubmissionPage) => Promise<void>;
   onAccount?: (account: import('@acm/connectors/contracts').AccountRef) => Promise<void>;
+  beforeRequest?: () => Promise<void>;
   runId?: string;
   job?: { id: string; queue: string };
   /** Explicit test/debug mode; API and deployed jobs always persist. */
@@ -47,9 +48,19 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
   let signal = AbortSignal.any([runtime.signal, budget]);
   const seen = new Set<string>();
   const problems = new Set<string>();
+  let collectionGeneration: number | undefined;
+  const beforeRequest = async () => {
+    if (persist && request.operation !== 'verify_session') {
+      const state = await collectionAvailability(request.platform, undefined, collectionGeneration);
+      if (state.reason) throw new ConnectorError(state.reason === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'CANCELLED', state.reason === 'AUTH_REQUIRED' ? '采集连接尚未登录' : '采集已暂停或设置已变化');
+      collectionGeneration ??= state.generation;
+    }
+    await runtime.beforeRequest?.();
+  };
   try {
     if (persist) { claimed = await startReadRun(runId, null); if (!claimed) throw new ConnectorError('INVALID_INPUT', 'Read run is already claimed'); }
     if (persist && request.operation !== 'verify_session' && !(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
+    await beforeRequest();
     if (persist && request.connectionId) connection = await ensureCollectionConnection(request.connectionId, request.platform);
     if (connection) {
       task = await holdConnectionTask(connection.id, signal);
@@ -61,6 +72,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
     }
     const onPage = async (page: SubmissionPage) => {
       signal.throwIfAborted();
+      await beforeRequest();
       if (persist && !(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
       await runtime.onPage?.(page);
       const nextSeen = new Set(seen), nextProblems = new Set(problems);
@@ -78,7 +90,7 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
       if (!['submissions', 'verify', 'verify_session', 'resolve'].includes(request.operation) || request.pageSize !== undefined || request.contestId !== undefined) throw new ConnectorError('NOT_IMPLEMENTED', 'Unsupported QOJ read capability');
       if (!runtime.qoj) throw new ConnectorError('NOT_IMPLEMENTED', 'QOJ runtime is required');
       if (runtime.qoj.connectionId !== request.connectionId) throw new ConnectorError('INVALID_INPUT', 'QOJ runtime connection mismatch');
-      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify' | 'verify_session' | 'resolve', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, range: request.range, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation, runtime.onAccount);
+      const result = await runtime.qoj.execute({ target: request.target, operation: request.operation as 'submissions' | 'verify' | 'verify_session' | 'resolve', mode: request.mode, cursor: request.cursor, checkpoint: request.checkpoint, range: request.range, maxPages: request.maxPages, maxDurationMs: request.maxDurationMs }, signal, onPage, connection?.generation, runtime.onAccount, beforeRequest);
       outcome.account = result.account;
       outcome.collector = result.collector;
       outcome.data.submissions = result.submissions; outcome.data.problems = result.problems;
@@ -91,9 +103,9 @@ export async function readPlatform(input: unknown, runtime: ReadRuntimeOptions):
       }
     } else {
       const rawCtx = runtime.context ?? (request.platform === 'luogu'
-        ? (await createLuoguRequestContext({ connectionId: request.connectionId!, signal, expectedGeneration: connection?.generation })).ctx
-        : createCodeforcesReadContext(signal));
-      const ctx: RequestContext = { ...rawCtx, signal, request: (url, init) => rawCtx.request(url, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }) };
+        ? (await createLuoguRequestContext({ connectionId: request.connectionId!, signal, expectedGeneration: connection?.generation, beforeRequest })).ctx
+        : createCodeforcesReadContext(signal, beforeRequest));
+      const ctx: RequestContext = { ...rawCtx, signal, request: async (url, init) => { await beforeRequest(); return rawCtx.request(url, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }); } };
       if (request.platform === 'luogu') outcome.collector = (await luoguLogin.verifySession(ctx)).uid;
       if (request.operation === 'verify_session') { outcome.batchStatus = 'complete'; }
       else if (request.operation === 'resolve') { outcome.account = await connector.resolveAccount(request.target, ctx); await runtime.onAccount?.(outcome.account); outcome.batchStatus = 'complete'; }

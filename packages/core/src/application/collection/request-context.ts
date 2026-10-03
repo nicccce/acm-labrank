@@ -20,6 +20,7 @@ interface RequestOptions {
   fetchImpl?: typeof fetch;
   allowedMethods?: readonly string[];
   maxRetries?: number;
+  beforeRequest?: () => Promise<void>;
   sessionHooks?: {
     beforeRequest(token: string, url: URL, init: RequestInit, signal: AbortSignal): Promise<RequestInit>;
     afterResponse(token: string, url: URL, response: Response, signal: AbortSignal): Promise<void>;
@@ -81,6 +82,7 @@ export function createRequestContext(options: RequestOptions): RequestContext {
     let released = false;
     try {
       requestSignal.throwIfAborted();
+      await options.beforeRequest?.();
       const prepared = options.sessionHooks ? await options.sessionHooks.beforeRequest(token, url, init, requestSignal) : init;
       requestSignal.throwIfAborted();
       const response = await fetchImpl(url, { ...prepared, redirect: 'manual', signal: requestSignal });

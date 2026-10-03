@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformRequestStore } from '@acm/db/server';
 import { createRequestContext, parseRetryAfter } from './request-context';
+import { ConnectorError } from '@acm/connectors/contracts';
 
 function memoryStore(): PlatformRequestStore {
   let owner: string | null = null;
@@ -23,6 +24,12 @@ const json = () => new Response('{}', { headers: { 'content-type': 'application/
 afterEach(() => vi.useRealTimers());
 
 describe('shared platform request context', () => {
+  it('rechecks the collection guard after acquiring a lease and releases it without sending', async () => {
+    const store = memoryStore(), release = vi.spyOn(store, 'release'), fetchImpl = vi.fn(async () => json());
+    const ctx = createRequestContext({ platform: 'codeforces', signal: new AbortController().signal, store, fetchImpl, beforeRequest: async () => { throw new ConnectorError('CANCELLED', 'Platform was disabled while waiting'); } });
+    await expect(ctx.request(url)).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(fetchImpl).not.toHaveBeenCalled(); expect(release).toHaveBeenCalledOnce();
+  });
   it('uses shared intervals and keeps the lease while the response body is in flight', async () => {
     vi.useFakeTimers();
     const store = memoryStore();

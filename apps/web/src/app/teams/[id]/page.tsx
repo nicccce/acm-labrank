@@ -15,7 +15,7 @@ export default async function TeamPage({ params: route, searchParams }: { params
     <ScoreSummary points={data.points} solveCount={data.solveCount} rank={data.rank} provisional={data.provisional} />
     <div className="table-wrap"><table className="data-table"><thead><tr><th>成员</th><th>积分</th><th>题数</th><th>CF</th><th>QOJ</th><th>洛谷</th><th>最近 AC</th></tr></thead><tbody>{data.members.map(m => <tr key={m.id}><td>{m.active ? <Link href={`/members/${m.id}?${params}`}>{m.displayName}</Link> : m.displayName}{!m.active ? '（已停用）' : ''}</td><td>{formatPoints(m.points)}</td><td>{m.solveCount}</td><td>{m.platformSolveCounts.codeforces ?? 0}</td><td>{m.platformSolveCounts.qoj ?? 0}</td><td>{m.platformSolveCounts.luogu ?? 0}</td><td>{formatTime(m.lastAcAt)}</td></tr>)}</tbody></table></div>
     <CoverageTable items={data.coverage} />
-    {!data.team.archivedAt && data.team.members.some(m => m.id === session.user.id) && <section><h2>编辑队伍</h2><TeamEditor key={data.team.version} self={session.user} team={data.team} csrfToken={session.csrfToken} /></section>}
+    {!data.team.archivedAt && data.team.members.some(m => m.id === session.user.id) && <details className="disclosure"><summary>编辑队伍</summary><TeamEditor key={data.team.version} self={session.user} team={data.team} csrfToken={session.csrfToken} /></details>}
     <section><TeamActions key={data.team.version} team={data.team} viewerId={session.user.id} csrfToken={session.csrfToken} /></section>
   </> : <PageError message={result.error!} />}</MemberShell>;
 }

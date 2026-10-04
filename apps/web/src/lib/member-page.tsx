@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { AppError } from '@acm/core/server';
-import { getScorePlatforms } from '@acm/core/server';
+import { getScorePlatforms, getSiteSettings } from '@acm/core/server';
 import { currentSession } from './http';
-import { LogoutButton } from '../components/logout-button';
+import { MemberNav } from '../components/member-nav';
+import { PageHeading } from '../components/page-heading';
 
 export type PageSearch = Promise<Record<string, string | string[] | undefined>>;
 export async function memberSession() { const session = await currentSession(); if (!session) redirect('/login'); return session; }
@@ -17,9 +18,9 @@ export async function loadPage<T>(fn: () => Promise<T>): Promise<{ data: T; erro
   catch (error) { if (!(error instanceof AppError)) throw error; if (error.status === 404) notFound(); return { data: null, error: error.message }; }
 }
 export async function scorePlatforms() { return getScorePlatforms(); }
-export function MemberShell({ session, title, children }: { session: Awaited<ReturnType<typeof memberSession>>; title: string; children: React.ReactNode }) {
-  return <main className="member-main"><header className="member-header"><Link href="/" className="brand">ACM 实验室榜单</Link><LogoutButton csrfToken={session.csrfToken} /></header>
-    <nav className="member-nav" aria-label="主导航"><Link href="/">个人榜</Link><Link href="/team-leaderboard">团队榜</Link><Link href={`/members/${session.user.id}`}>我的成绩</Link><Link href="/profile">我的资料</Link><Link href="/teams">我的队伍</Link>{session.user.role === 'admin' && <><Link href="/admin/collection">采集与积分更新</Link><Link href="/admin/connections">管理平台登录</Link></>}</nav>
-    <h1>{title}</h1>{children}</main>;
+export async function MemberShell({ session, title, children }: { session: Awaited<ReturnType<typeof currentSession>>; title: string; children: React.ReactNode }) {
+  const settings = await getSiteSettings();
+  return <div className="member-main"><a className="skip-link" href="#main-content">跳至内容</a><header className="member-header"><div className="brand-slot">{settings.headerText && <Link href="/" className="brand" aria-label="榜单首页">{settings.headerText}</Link>}</div><MemberNav userId={session?.user.id} name={session?.user.displayName} admin={session?.user.role === 'admin'} csrfToken={session?.csrfToken} /></header>
+    <main id="main-content"><PageHeading title={title} />{children}</main><footer className="site-footer"><span>ACM LAB</span><span className="footer-shapes" aria-hidden="true">● ◒ ■</span><span>每一次 AC，都算数。</span></footer></div>;
 }
 export function PageError({ message }: { message: string }) { return <p role="alert" className="error">{message}</p>; }

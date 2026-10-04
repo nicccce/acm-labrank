@@ -30,9 +30,11 @@ try {
   await page.goto('http://localhost:3000/admin/connections');
   await page.getByLabel('用户名').fill(username); await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click(); await page.waitForURL('http://localhost:3000/');
-  await page.getByRole('link', { name: '管理平台登录' }).click();
-  await page.getByRole('heading', { name: '平台采集连接', exact: true }).waitFor();
+  await page.getByLabel('账户菜单', { exact: true }).click();
+  await page.getByRole('link', { name: '平台连接', exact: true }).click();
+  await page.getByRole('heading', { name: '平台连接', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '获取验证码', exact: true }).isDisabled(), true);
+  await page.getByText('打开远程桌面', { exact: true }).click();
   const iframe = page.locator('iframe[title="QOJ 专用浏览器远程桌面"]');
   assert.ok((await iframe.getAttribute('src')).startsWith('http://localhost:6080/vnc.html'));
   const remoteDesktop = page.frameLocator('iframe[title="QOJ 专用浏览器远程桌面"]');
@@ -94,7 +96,9 @@ try {
   assert.equal(candidate.status(), 202);
   assert.equal((await pool.query('SELECT candidate_state FROM platform_bindings WHERE user_id=$1', [ids[1]])).rows[0].candidate_state, 'pending');
   const anonymous = await browser.newContext();
-  assert.equal((await anonymous.request.get('http://localhost:3000/api/leaderboard')).status(), 401);
+  const publicBoard = await anonymous.request.get('http://localhost:3000/api/leaderboard');
+  assert.equal(publicBoard.status(), 200); assert.equal('coverage' in await publicBoard.json(), false);
+  assert.equal((await anonymous.request.get(`http://localhost:3000/api/members/${ids[1]}`)).status(), 401);
   assert.equal((await pool.query('SELECT enabled FROM collection_control WHERE id=1')).rows[0].enabled, false);
   console.log(JSON.stringify({ event: 'web_probe_passed', checks: ['administrator page', 'embedded noVNC', 'visible Luogu failure and retry', 'member API', 'Origin/CSRF/role', 'date and ID validation', 'paused sync', 'queued candidate without fetching'], screenshot: '/tmp/web-probe/connections.png' }));
 } finally {

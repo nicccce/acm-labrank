@@ -150,6 +150,15 @@ export const collectionResetRequests = pgTable('collection_reset_requests', {
   input: jsonb('input').notNull(), result: jsonb('result').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const siteSettings = pgTable('site_settings', {
+  id: integer('id').primaryKey(),
+  headerText: text('header_text').default('').notNull(),
+  loginText: text('login_text').default('').notNull(),
+  version: integer('version').default(1).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+}, t => [check('site_settings_values', sql`${t.id}=1 AND ${t.version}>0 AND length(${t.headerText})<=80 AND length(${t.loginText})<=800`)]);
+
 export const platformLoginAttempts = pgTable('platform_login_attempts', {
   id: uuid('id').primaryKey(), sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
   connectionId: text('connection_id').notNull().references(() => platformConnections.id), generation: integer('generation').notNull(),

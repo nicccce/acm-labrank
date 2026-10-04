@@ -13,3 +13,4 @@ export * from './personal-queries';
 export * from './collection/settings';
 export * from './collection/management';
 export * from './teams';
+export * from './site-settings';

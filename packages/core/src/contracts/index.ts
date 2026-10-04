@@ -1,4 +1,5 @@
 import type { PlatformId } from '@acm/connectors/contracts';
+export interface SiteSettings { headerText: string; loginText: string; version: number }
 export type SyncScope = 'initial' | 'incremental' | 'range';
 export type Platform = PlatformId;
 export type Range = { kind: 'rolling'; days: 7 | 30 } | { kind: 'fixed'; from: string; to: string };

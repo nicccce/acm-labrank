@@ -63,7 +63,7 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
   return <div className="space-y-8">
     <section className="rounded border bg-white p-5">
       <h2 className="text-lg font-semibold">采集控制</h2>
-      <p className="my-3">当前：{control.enabled ? '已启用' : '已暂停'}。CF 无需平台登录；QOJ、洛谷在启用并登录后参与采集，可前往采集管理页选择平台。</p>
+      <p className="my-3">{control.enabled ? '采集已启用' : '采集已暂停'}</p>
       <button className={button} disabled={busy} onClick={() => void action(async () => { const updated = await call<Control>('/api/admin/collection-control', 'PUT', { enabled: !control.enabled, version: control.version }); setControl(updated); setMessage(updated.enabled ? '采集已启用，worker 会接收已入队任务。' : '采集已暂停，身份核验仍可使用。'); })}>{control.enabled ? '暂停采集' : '启用采集'}</button>
     </section>
     <section className="rounded border bg-white p-5">
@@ -86,10 +86,10 @@ export function PlatformConnections({ csrfToken, vncUrl, initialConnections, ini
       <p role="status" aria-live="polite" className="mt-3 min-h-6 text-blue-800">{luoguMessage}</p>
     </section>
     <section className="rounded border bg-white p-5">
-      <h2 className="text-lg font-semibold">QOJ 远程桌面登录</h2>
+      <h2 className="text-lg font-semibold">QOJ 登录</h2>
       <p className="my-3">连接：{connections.qoj?.state ?? 'unknown'} · 身份：{connections.qoj?.collector ?? '未核验'} · 列表读取权限待测试</p>
       <p className="mb-3 text-sm text-slate-600">在下面的桌面中输入 VNC 密码，再登录 QOJ。完成后点击核验按钮。</p>
-      <iframe title="QOJ 专用浏览器远程桌面" src={vncUrl} className="h-[720px] w-full rounded border" allow="fullscreen" />
+      <details className="disclosure"><summary>打开远程桌面</summary><iframe loading="lazy" title="QOJ 专用浏览器远程桌面" src={vncUrl} className="h-[720px] w-full rounded border" allow="fullscreen" /></details>
       <div className="mt-3 flex flex-wrap gap-3"><button className={button} disabled={busy} onClick={() => void action(verifyQoj)}>已登录，核验 QOJ 身份</button><a className={button} href={vncUrl} target="_blank" rel="noreferrer">单独打开远程桌面</a></div>
     </section>
     <div className="flex gap-3"><button className={button} disabled={busy} onClick={() => void action(refreshConnections)}>刷新连接状态</button>{(['luogu', 'qoj'] as const).map(platform => <button key={platform} className={button} disabled={busy} onClick={() => void action(async () => { await call(`/api/admin/connections/${platform}`, 'DELETE'); await refreshConnections(); setMessage('本地连接已断开；QOJ 浏览器中的平台会话可通过显式核验重新连接。'); })}>断开 {platform}</button>)}</div>

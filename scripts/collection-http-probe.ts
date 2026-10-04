@@ -61,8 +61,11 @@ try {
   await page.goto(`${base}/admin/collection`);
   await page.getByLabel('用户名').fill('probe_admin'); await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click(); await page.waitForURL(`${base}/`);
-  await page.getByRole('link', { name: '采集与积分更新', exact: true }).click();
-  await page.getByRole('heading', { name: '采集与积分更新', exact: true }).waitFor();
+  await page.getByLabel('账户菜单', { exact: true }).click();
+  await page.getByRole('link', { name: '采集管理', exact: true }).click();
+  await page.getByRole('heading', { name: '采集管理', exact: true }).waitFor();
+  await page.getByText('同步与计分设置', { exact: true }).click();
+  await page.locator('article').filter({ has: page.getByRole('heading', { name: 'Codeforces', exact: true }) }).getByText('请求间隔', { exact: true }).click();
   assert.equal(await page.getByLabel('Codeforces', { exact: true }).isChecked(), true);
   assert.equal(await page.getByLabel('QOJ', { exact: true }).isChecked(), false);
   let releaseOld: (() => void) | undefined, held = false, delayed = false;
@@ -89,7 +92,8 @@ try {
   await page.getByLabel('Codeforces最小请求间隔').fill('2200'); await page.getByLabel('Codeforces最大请求间隔').fill('3200');
   await cf.getByRole('button', { name: '保存请求间隔', exact: true }).click(); await page.getByRole('status').getByText('Codeforces请求间隔已保存。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '启用采集', exact: true }).click(); await page.getByRole('button', { name: '暂停采集', exact: true }).waitFor();
-  await page.getByRole('button', { name: '采集新增提交并更新积分', exact: true }).click(); await page.getByRole('status').getByText(/合并 .* 个已有任务/).waitFor();
+  await page.getByRole('button', { name: '立即同步', exact: true }).click(); await page.getByRole('status').getByText(/合并 .* 个已有任务/).waitFor();
+  await page.getByText('补采历史', { exact: true }).click();
   await page.getByLabel('补采开始日期', { exact: true }).fill('2026-09-01'); await page.getByLabel('补采结束日期', { exact: true }).fill('2026-09-02');
   const supplementalRequest = page.waitForRequest((r: { url(): string; method(): string }) => r.url().endsWith('/api/admin/sync') && r.method() === 'POST');
   await page.getByRole('button', { name: '补采所选历史区间', exact: true }).click();
@@ -99,6 +103,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'Mobile page must not overflow horizontally');
   await page.screenshot({ path: '/tmp/collection-probe/mobile.png', fullPage: true });
+  await page.getByText('清空与重爬', { exact: true }).click();
   await page.getByRole('button', { name: '选择重爬平台…', exact: true }).click();
   await page.getByRole('dialog').waitFor(); await page.screenshot({ path: '/tmp/collection-probe/reset-confirmation.png', fullPage: false });
   const request = page.waitForRequest((r: { url(): string; method(): string }) => r.url().endsWith('/api/admin/collection-reset') && r.method() === 'POST');

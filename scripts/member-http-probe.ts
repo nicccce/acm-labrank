@@ -27,13 +27,16 @@ try {
   for (let i = 0; i < 60; i++) { if (server.exitCode !== null) throw new Error(`Web verification exited: ${output}`); try { if ((await fetch(`${base}/api/health/live`)).ok) { ready = true; break; } } catch { /* Starting. */ } await new Promise(resolve => setTimeout(resolve, 500)); }
   assert.ok(ready, `Web verification not ready: ${output}`);
   const a = await login('member_a'), b = await login('member_b'), e = await login('member_e'), f = await login('member_f');
-  for (const path of ['/api/members', '/api/teams', '/api/team-leaderboard']) { assert.equal((await api(path)).status, 401); const response = await api(path, a); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); const data = JSON.stringify(await response.json()); assert.equal(/passwordHash|password_hash|encryptedSession|tokenHash|candidateError/.test(data), false); }
+  for (const path of ['/api/members', '/api/teams']) { assert.equal((await api(path)).status, 401); const response = await api(path, a); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); const data = JSON.stringify(await response.json()); assert.equal(/passwordHash|password_hash|encryptedSession|tokenHash|candidateError/.test(data), false); }
+  for (const path of ['/api/leaderboard', '/api/team-leaderboard']) { const response = await api(path); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); const data = await response.json() as Record<string, unknown>; assert.equal('coverage' in data, false); }
+  for (const path of [`/api/members/${a.user.id}`, `/api/members/${a.user.id}/solves`, `/api/members/${a.user.id}/submissions`]) assert.equal((await api(path)).status, 401);
   assert.equal((await api('/api/admin/platforms', a)).status, 403);
   const input = { name: 'API EF', memberIds: [e.user.id, f.user.id] };
   assert.equal((await api('/api/teams', e, 'POST', input, { origin: 'https://wrong.example' })).status, 403);
   assert.equal((await api('/api/teams', e, 'POST', input, { 'x-csrf-token': 'bad' })).status, 403);
   assert.equal((await api('/api/teams', e, 'POST', { ...input, memberIds: [e.user.id, e.user.id] })).status, 400);
   const created = await api('/api/teams', e, 'POST', input); assert.equal(created.status, 201); const team = await created.json() as { id: string };
+  assert.equal((await api(`/api/teams/${team.id}`)).status, 401);
   const duplicate = await api('/api/teams', f, 'POST', { name: 'different name', memberIds: [...input.memberIds].reverse() }); assert.equal(duplicate.status, 200); assert.equal((await duplicate.json() as { id: string }).id, team.id);
   assert.equal((await api(`/api/teams/${team.id}`, a, 'PUT', { ...input, version: 1 })).status, 403);
   assert.equal((await api(`/api/teams/${team.id}`, a, 'DELETE', { version: 1 })).status, 403);
@@ -54,11 +57,13 @@ try {
   page.on('pageerror', (error: Error) => errors.push(error.message));
   await page.goto(`${base}/teams`); await page.waitForURL(`${base}/login`);
   await page.getByLabel('用户名', { exact: true }).fill('member_e'); await page.getByLabel('密码', { exact: true }).fill(password); await page.getByRole('button', { name: '登录', exact: true }).click(); await page.waitForURL(`${base}/`);
-  assert.equal(await page.getByRole('link', { name: '采集与积分更新', exact: true }).count(), 0);
-  await page.getByRole('link', { name: '我的资料', exact: true }).click();
+  assert.equal(await page.getByRole('link', { name: '采集管理', exact: true }).count(), 0);
+  await page.getByLabel('账户菜单', { exact: true }).click();
+  await page.getByRole('link', { name: '资料与账号', exact: true }).click();
   await page.getByLabel('真实姓名（选填）').fill('乙同学'); await page.getByRole('button', { name: '保存姓名', exact: true }).click(); await page.getByRole('status').getByText('已保存', { exact: true }).waitFor();
   assert.equal((await (await api('/api/me', e)).json() as { realName: string }).realName, '乙同学');
   await page.getByRole('link', { name: '我的队伍', exact: true }).click();
+  if (!await page.getByLabel('队伍名称').isVisible()) await page.getByText('＋ 创建队伍', { exact: true }).click();
   let releaseSearch: (() => void) | undefined;
   const delayedSearch = new Promise<void>(resolve => { releaseSearch = resolve; });
   await page.route('**/api/members?*', async (route: Route) => {
@@ -75,15 +80,18 @@ try {
   await page.getByRole('button', { name: '创建队伍', exact: true }).click(); await page.waitForURL(/\/teams\/[a-f0-9-]+$/); await page.getByRole('heading', { name: 'UI EC', exact: true }).waitFor();
   const uiId = new URL(page.url()).pathname.split('/').at(-1)!;
   await page.goto(`${base}/teams`);
+  await page.getByText('＋ 创建队伍', { exact: true }).click();
   await page.getByLabel('队伍名称').fill('duplicate name'); await page.getByLabel('查找成员').fill('member_c'); await page.getByRole('button', { name: '搜索成员', exact: true }).click();
   await page.locator('.member-choice').filter({ hasText: 'member_c' }).getByRole('button', { name: '添加', exact: true }).click();
   await page.getByRole('button', { name: '创建队伍', exact: true }).click(); await page.getByRole('status').getByText(/已存在相同成员/).waitFor();
   await page.getByRole('link', { name: '查看已有队伍', exact: true }).click(); await page.waitForURL(`${base}/teams/${uiId}`); await page.getByRole('heading', { name: 'UI EC', exact: true }).waitFor();
+  await page.getByText('编辑队伍', { exact: true }).click();
   await page.getByLabel('队伍名称').fill('UI EC changed'); await page.getByRole('button', { name: '保存队伍', exact: true }).click(); await page.getByRole('heading', { name: 'UI EC changed', exact: true }).waitFor();
   assert.equal(await page.getByLabel('负责人', { exact: true }).count(), 0);
   const cContext = await browser.newContext(), cPage = await cContext.newPage(); cPage.on('pageerror', (error: Error) => errors.push(error.message));
   await cPage.goto(`${base}/login`); await cPage.getByLabel('用户名', { exact: true }).fill('member_c'); await cPage.getByLabel('密码', { exact: true }).fill(password); await cPage.getByRole('button', { name: '登录', exact: true }).click(); await cPage.waitForURL(`${base}/`);
   await cPage.goto(`${base}/teams/${uiId}`);
+  await cPage.getByText('编辑队伍', { exact: true }).click();
   await cPage.getByLabel('队伍名称').fill('UI EC shared'); await cPage.getByRole('button', { name: '保存队伍', exact: true }).click(); await cPage.getByRole('heading', { name: 'UI EC shared', exact: true }).waitFor();
   await cPage.getByLabel('查找成员').fill('member_f'); await cPage.getByRole('button', { name: '搜索成员', exact: true }).click();
   await cPage.locator('.member-choice').filter({ hasText: 'member_f' }).getByRole('button', { name: '添加', exact: true }).click();
@@ -99,7 +107,7 @@ try {
   await page.getByRole('link', { name: '已归档', exact: true }).click(); await page.getByRole('link', { name: 'UI EC shared', exact: true }).waitFor();
   const archived = await (await api(`/api/teams/${uiId}`, e)).json() as { team: { archivedAt: string | null }; rank: number | null }; assert.ok(archived.team.archivedAt); assert.equal(archived.rank, null);
   await page.getByRole('link', { name: '团队榜', exact: true }).click();
-  await page.getByLabel('日期', { exact: true }).selectOption('custom'); await page.getByLabel('开始日期').fill('2026-10-02'); await page.getByLabel('结束日期').fill('2026-10-02'); await page.getByRole('button', { name: '查询', exact: true }).click(); await page.waitForURL(/from=2026-10-02/);
+  await page.getByRole('button', { name: '自定义', exact: true }).click(); await page.getByLabel('开始日期').fill('2026-10-02'); await page.getByLabel('结束日期').fill('2026-10-02'); await page.getByRole('button', { name: '应用筛选', exact: true }).click(); await page.waitForURL(/from=2026-10-02/);
   await mkdir('/tmp/member-probe', { recursive: true }); await page.screenshot({ path: '/tmp/member-probe/team-desktop.png', fullPage: true });
   for (const path of ['/', '/profile', '/teams', `/teams/${uiId}`, `/members/${b.user.id}`]) { await page.setViewportSize({ width: 390, height: 844 }); await page.goto(`${base}${path}`); assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, `${path} overflows mobile`); }
   await page.getByRole('link', { name: '提交记录', exact: true }).click(); await page.waitForURL(/view=submissions/); await page.getByRole('columnheader', { name: '原站得分', exact: true }).waitFor();

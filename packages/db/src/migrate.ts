@@ -3,6 +3,7 @@ import { migrateSchema } from './schema-migrations';
 import { createBoss, PROBE_QUEUE, PLATFORM_READ_QUEUES, PERSONAL_QUEUES, QOJ_SESSION_QUEUE } from './queue';
 import { initializePlatformPolicies } from './collection/policies';
 import { initializeCollectionSettings } from './collection/settings';
+import { initializeSiteSettings } from './site-settings';
 
 const lock = await getPool().connect();
 const boss = createBoss(true);
@@ -21,6 +22,7 @@ try {
   // Bounded reads with business outcomes; challenges must not become endless queue retries.
   await getPool().query('INSERT INTO collection_control(id) VALUES (1) ON CONFLICT DO NOTHING');
   await initializeCollectionSettings();
+  await initializeSiteSettings();
   for (const queue of [...Object.values(PLATFORM_READ_QUEUES), ...Object.values(PERSONAL_QUEUES), QOJ_SESSION_QUEUE]) {
     await boss.createQueue(queue, { policy: 'exclusive', retryLimit: 0, expireInSeconds: 960, heartbeatSeconds: 30 });
     await boss.updateQueue(queue, { retryLimit: 0, expireInSeconds: 960, heartbeatSeconds: 30 });

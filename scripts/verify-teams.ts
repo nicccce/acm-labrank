@@ -23,7 +23,7 @@ try {
   const target = new URL(baseUrl); target.pathname = `/${database}`; process.env.DATABASE_URL = target.href;
   const pool = getPool();
   const journal = JSON.parse(await readFile(join(folder, 'meta/_journal.json'), 'utf8'));
-  const previous = journal.entries.slice(0, -1);
+  const previous = journal.entries.slice(0, journal.entries.findIndex((entry: { tag: string }) => entry.tag === '0010_equal_team_members'));
   await mkdir(join(stage, 'meta'));
   await writeFile(join(stage, 'meta/_journal.json'), JSON.stringify({ ...journal, entries: previous }));
   for (const entry of previous) await copyFile(join(folder, `${entry.tag}.sql`), join(stage, `${entry.tag}.sql`));

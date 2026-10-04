@@ -164,6 +164,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .footer-project, .footer-links { display: flex; flex-direction: column; gap: 4px; }
 .footer-project { min-width: 0; overflow-wrap: anywhere; }
 .footer-links { align-items: flex-end; flex-shrink: 1; min-width: 0; max-width: 50%; }
+.footer-resource-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; }
 .footer-login-text { white-space: pre-wrap; overflow-wrap: anywhere; text-align: right; min-width: 0; }
 .footer-links a { text-decoration: underline; text-underline-offset: 3px; }
 .footer-links a:hover { color: var(--foreground); }
@@ -179,7 +180,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .admin-content .disclosure > section { padding: 0; border: 0; }
 .admin-content [role="dialog"] { border: 1px solid var(--line); }
 
-.auth-page { min-height: 100svh; display: grid; place-items: center; padding: 32px; }
+.auth-layout { min-height: 100svh; display: flex; flex-direction: column; }
+.auth-page { flex: 1; display: grid; place-items: center; padding: 32px; }
+.site-footer.auth-footer { width: min(850px, calc(100% - 64px)); margin: 0 auto; padding: 0 0 24px; }
 .auth-card { display: grid; grid-template-columns: 1fr 1fr; width: min(850px, 100%); border: 1.5px solid var(--foreground); border-radius: 22px 22px 22px 5px; background: var(--surface); box-shadow: 5px 5px 0 var(--foreground); overflow: hidden; }
 .auth-art { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 38px; min-height: 500px; background: #f8edda; border-right: 1.5px solid var(--foreground); padding: 38px; }
 .auth-art .memphis-mark { width: min(100%, 300px); }
@@ -250,6 +253,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .score-summary strong { font-size: 28px; }
   .disclosure { padding: 15px; }
   .auth-page { padding: 20px; }
+  .site-footer.auth-footer { width: calc(100% - 40px); }
   .auth-card { grid-template-columns: 1fr; }
   .auth-art { flex-direction: row; min-height: 130px; padding: 22px; gap: 18px; border-right: 0; border-bottom: 1.5px solid var(--foreground); }
   .auth-art .memphis-mark { width: 140px; }
@@ -259,6 +263,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .footer-project { flex-basis: 100%; }
   .footer-links { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px; max-width: 100%; }
   .footer-login-text { text-align: left; }
+  .footer-resource-links { justify-content: flex-start; }
   .footer-shapes { font-size: 10px; letter-spacing: 4px; }
 }
 @media (max-width: 360px) {

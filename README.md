@@ -18,7 +18,7 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 
 ## 部署方式一：Compose 直接拉取镜像
 
-需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `2026.10.04`，发布平台为 `linux/amd64`。应用镜像 `2026.10.04` 负责 Web、迁移及管理员初始化；通用采集镜像 `worker-2026.10.04` 同时负责 Codeforces、洛谷和 QOJ，并内置 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
+需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `1.0.0`，发布平台为 `linux/amd64`。应用镜像 `1.0.0` 负责 Web、迁移及管理员初始化；通用采集镜像 `worker-1.0.0` 同时负责 Codeforces、洛谷和 QOJ，并内置 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
 
 Linux 服务器执行：
 
@@ -27,7 +27,7 @@ git clone https://github.com/nicccce/acm-labrank.git
 cd acm-labrank
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$PWD,target=/deployment" \
-  --entrypoint node nicccce/acm-labrank:2026.10.04 \
+  --entrypoint node nicccce/acm-labrank:1.0.0 \
   scripts/setup.mjs --directory /deployment
 # 编辑 .env：本地测试保留 APP_URL；公网部署设为实际 HTTPS 地址
 docker compose pull
@@ -137,3 +137,9 @@ Compose 按 `db healthy → migrate 成功 → bootstrap 成功 → web / worker
 发布包含新迁移的版本时，先备份、暂停采集并等待活动任务结束，再按[升级流程](docs/部署与运维.md)部署匹配的新 Web/worker。保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)替换 Node worker，保持容器及 Chromium 运行。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
 
 当前采集策略：首次近 30 天、每批 3 页/120 秒，之后持续增量；榜单日期只控制查询，历史补采单独执行。结构与功能缺口见[项目实现状态](docs/项目实现状态.md)。
+
+## 许可证
+
+Copyright 2026 nicccce and contributors.
+
+本项目采用 [Apache License 2.0](LICENSE)，署名信息见 [NOTICE](NOTICE)。第三方依赖遵循各自的许可证。

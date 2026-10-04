@@ -1,7 +1,7 @@
 name: acm-leaderboard
 
 x-app: &app
-  image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:${ACM_IMAGE_TAG:-2026.10.04}
+  image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:${ACM_IMAGE_TAG:-1.0.0}
   init: true
   environment: &app-env
     NODE_ENV: production
@@ -96,7 +96,7 @@ services:
 
   worker:
     <<: *app
-    image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:worker-${ACM_IMAGE_TAG:-2026.10.04}
+    image: ${ACM_IMAGE_REPOSITORY:-nicccce/acm-labrank}:worker-${ACM_IMAGE_TAG:-1.0.0}
     command: ["pnpm", "--filter", "@acm/worker", "start"]
     restart: unless-stopped
     environment:

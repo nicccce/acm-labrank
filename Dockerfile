@@ -22,8 +22,9 @@ FROM base AS runtime
 ENV NODE_ENV=production
 ENV TZ=UTC
 ARG VCS_REF=unknown
-ARG APP_VERSION=dev
+ARG APP_VERSION=1.0.0
 LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.version=$APP_VERSION
 COPY --from=build --chown=node:node /app /app
@@ -45,8 +46,9 @@ FROM browser-system AS worker-browser
 ENV NODE_ENV=production
 ENV TZ=UTC
 ARG VCS_REF=unknown
-ARG APP_VERSION=dev
+ARG APP_VERSION=1.0.0
 LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.version=$APP_VERSION
 COPY --from=runtime --chown=node:node /app /app

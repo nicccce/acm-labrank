@@ -11,6 +11,7 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 - [个人后端与 Web 登录](docs/个人后端与Web登录.md)：本轮 API、管理员交接、采集开关和离线集成验证。
 - [成员页面与团队榜](docs/成员页面与团队榜.md)：页面、团队计分、去重和接口。
 - [管理员采集管理](docs/管理员采集管理.md)：管理页、定时增量、计分区间、平台选择和局部重爬。
+- 管理员赋分设置：`/admin/scoring` 可编辑各平台分值、恢复默认；保存后个人榜、团队榜和历史明细自动按新规则计算。
 - [采集架构与管理 API](docs/采集架构与管理API.md)：公共契约、数据库限流、连接状态、错误处理与部署。
 - [QOJ 运行手册](docs/QOJ采集流程与技术维护.md)：专用浏览器、人工登录、接管与故障处理。
 - 连接器规则：[Codeforces](packages/connectors/src/codeforces/README.md)、[洛谷](packages/connectors/src/luogu/README.md)、[QOJ](packages/connectors/src/qoj/README.md)。

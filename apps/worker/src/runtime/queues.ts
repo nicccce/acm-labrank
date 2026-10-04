@@ -5,7 +5,6 @@ export async function registerPlatformQueues(boss: ReadQueueClient, runtime: Rea
   for (const [platform, queue] of Object.entries(PLATFORM_READ_QUEUES) as [PlatformId, string][]) {
     await boss.work<{ version: 1; runId: string } | unknown>(queue, { batchSize: 1, pollingIntervalSeconds: 2, heartbeatRefreshSeconds: 5 }, async jobs => {
       const job = jobs[0]!;
-      if (!(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
       const envelope = job.data as { version?: number; runId?: string };
       let input: unknown;
       let runId: string | undefined;
@@ -19,6 +18,7 @@ export async function registerPlatformQueues(boss: ReadQueueClient, runtime: Rea
         input = { ...qojReadJobSchema.parse(job.data), platform, connectionId }; legacy = true;
       } else throw new ConnectorError('INVALID_INPUT', 'Invalid platform queue envelope');
       const request = parsePlatformReadRequest(input);
+      if (request.operation !== 'verify_session' && !(await getCollectionControl()).enabled) throw new ConnectorError('CANCELLED', 'Collection is paused');
       const result = await readPlatform(request, { ...runtime, runId, job: { id: job.id, queue }, signal: AbortSignal.any([runtime.signal, job.signal]) });
       console.log(JSON.stringify({ event: 'platform_worker_read', jobId: job.id, ...readOutcomeSummary(result) }));
       return legacy ? { ...result, pages: result.progress.pages, uniqueSubmissions: result.progress.uniqueRecordCount, cursor: result.continuation.cursor, checkpoint: result.continuation.checkpoint, submissions: result.data.submissions, problems: result.data.problems, code: result.error?.code } : result;

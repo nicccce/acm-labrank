@@ -18,6 +18,7 @@ export * from './personal';
 export * from './collection/settings';
 export * from './teams';
 export * from './site-settings';
+export * from './scoring-settings';
 export * from './scores/overview';
 export type { PlatformId, PlatformReadRequest, PlatformReadOutcome } from '@acm/connectors/contracts';
 export * from './collection/maintenance';

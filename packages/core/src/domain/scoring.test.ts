@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { CF_BANDS, LUOGU_POINTS, dateRange, problemPoints } from './scoring';
-describe('v1 scoring and Beijing dates', () => {
+import { CF_BANDS, DEFAULT_SCORING_RULES, LUOGU_POINTS, dateRange, problemPoints } from './scoring';
+describe('configurable scoring and Beijing dates', () => {
+  it('uses custom points across every band, unknown difficulty and QOJ', () => {
+    const rules = structuredClone(DEFAULT_SCORING_RULES);
+    rules.codeforces.points = rules.codeforces.points.map((_, i) => i / 2);
+    rules.codeforces.unknownPoints = 7.125;
+    rules.luogu.points = rules.luogu.points.map((_, i) => i * 3);
+    rules.luogu.unknownPoints = 0; rules.qoj.points = 21;
+    CF_BANDS.forEach(([boundary], i) => { expect(problemPoints('codeforces', boundary - 1, rules)).toBe(i / 2); expect(problemPoints('codeforces', boundary, rules)).toBe((i + 1) / 2); });
+    expect(problemPoints('codeforces', null, rules)).toBe(7.125);
+    expect(problemPoints('codeforces', NaN, rules)).toBe(7.125);
+    rules.luogu.points.forEach((value, i) => expect(problemPoints('luogu', i + 1, rules)).toBe(value));
+    for (const difficulty of [null, 0, 9, Infinity]) expect(problemPoints('luogu', difficulty, rules)).toBe(0);
+    for (const difficulty of [null, 2000]) expect(problemPoints('qoj', difficulty, rules)).toBe(21);
+  });
   it('covers every CF band edge and unknown difficulty', () => {
     expect(problemPoints('codeforces', null)).toBe(3);
     CF_BANDS.forEach(([boundary, points], i) => { expect(problemPoints('codeforces', boundary - 1)).toBe(points); expect(problemPoints('codeforces', boundary)).toBe(CF_BANDS[i + 1]?.[1] ?? 15); });

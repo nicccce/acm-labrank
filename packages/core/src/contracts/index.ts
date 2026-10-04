@@ -7,6 +7,7 @@ export type Settings = { platforms: Platform[]; autoSyncEnabled: boolean; syncIn
 export type Summary = { platform: Platform; bindingCount: number; submissionCount: number; problemCount: number; lastSuccessAt: string | null; nextSyncAt: string | null; blockedCount: number; skipped: string | null; message: string | null };
 export type Rate = { minIntervalMs: number; maxIntervalMs: number; version: number };
 export type PlatformInfo = { platform: Platform; name: string; rateLimit: Rate; connection: { state: string; collector: string | null } };
+export type ConnectionAlert = Pick<PlatformInfo, 'platform' | 'name'>;
 export type Job = { id: string; platform: Platform; username: string; handle: string | null; source: string; kind: string; mode: string; scope: SyncScope; initialFrom: string | null; status: string; pages: number; recordsWithOverlap: number; batch: number; range: { from: string; to: string } | null; createdAt: string; startedAt: string | null; finishedAt: string | null; error: { code?: string; message?: string } | null };
 export type Jobs = { items: Job[]; nextCursor: string | null };
 export type Leaderboard = { range: { from: string; to: string }; provisional: boolean; total: number; items: { id: string; rank: number; displayName: string; points: number; solveCount: number; lastAcAt: string | null }[] };

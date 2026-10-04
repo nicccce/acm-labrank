@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { getConnector } from '@acm/connectors/server';
 import { ConnectorError, type PlatformId } from '@acm/connectors/contracts';
 import { platforms, isPlatformId } from '@acm/connectors/metadata';
-import { dispatchDueCollection, getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy, getCollectionControl, setCollectionControl, disconnectCollectionConnection } from '@acm/db/server';
+import { dispatchDueCollection, getReadRun, latestReadFailures, listCollectionConnections, listPlatformPolicies, listReadRuns, updatePlatformPolicy, getCollectionControl, getCollectionSettings, setCollectionControl, disconnectCollectionConnection } from '@acm/db/server';
 import { AppError } from '../errors';
 import { requestPlatformRead, retryPlatformRead, withReadQueue } from './jobs';
 import { requireCollectionEnabled } from '../personal';
@@ -23,15 +23,24 @@ export async function getAdminPlatforms() {
   return { items: platforms.map(platform => {
     const connector = getConnector(platform.id);
     const connectionId = process.env[platform.id === 'qoj' ? 'QOJ_CONNECTION_ID' : 'LUOGU_CONNECTION_ID'] ?? `${platform.id}-lab`;
+    const connection = connections.find(connection => connection.id === connectionId && connection.platform === platform.id);
     return {
       platform: platform.id, name: platform.name, requiresLogin: platform.requiresLogin,
       capabilities: { ...connector.capabilities, profile: Boolean(connector.fetchProfile), ratingHistory: Boolean(connector.fetchRatingHistory), contests: Boolean(connector.fetchContests), standings: Boolean(connector.fetchStandings), problem: Boolean(connector.fetchProblem) },
       rateLimit: policies.find(policy => policy.platform === platform.id) ?? null,
-      connection: platform.requiresLogin ? connections.find(connection => connection.id === connectionId && connection.platform === platform.id) ?? { id: connectionId, state: 'unknown', collector: null, generation: 0, verifiedAt: null } : { state: 'not_required', collector: null },
+      connection: platform.requiresLogin ? connection ? { ...connection, collector: connection.state === 'ready' ? connection.collector : null } : { id: connectionId, state: 'unknown', collector: null, generation: 0, verifiedAt: null } : { state: 'not_required', collector: null },
       latestFailure: runs.find(run => run.platform === platform.id && !['queued', 'running', 'completed'].includes(run.status)) ?? null,
-      authentication: platform.id === 'codeforces' ? { kind: 'none' } : platform.id === 'luogu' ? { kind: 'web_captcha', readingPermission: connections.find(c => c.id === connectionId)?.readingVerifiedAt ? 'verified' : 'unverified' } : { kind: 'embedded_novnc', url: process.env.QOJ_VNC_URL ?? 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale', readingPermission: connections.find(c => c.id === connectionId)?.readingVerifiedAt ? 'verified' : 'unverified' },
+      authentication: platform.id === 'codeforces' ? { kind: 'none' } : platform.id === 'luogu' ? { kind: 'web_captcha', readingPermission: connection?.state === 'ready' && connection.readingVerifiedAt ? 'verified' : 'unverified' } : { kind: 'embedded_novnc', url: process.env.QOJ_VNC_URL ?? 'http://localhost:6080/vnc.html?autoconnect=1&resize=scale', readingPermission: connection?.state === 'ready' && connection.readingVerifiedAt ? 'verified' : 'unverified' },
     };
   }) };
+}
+export async function getAdminConnectionAlerts() {
+  const [settings, connections] = await Promise.all([getCollectionSettings(), listCollectionConnections()]);
+  return { items: platforms.filter(platform => {
+    if (!platform.requiresLogin || !settings.platforms.includes(platform.id)) return false;
+    const connectionId = process.env[platform.id === 'qoj' ? 'QOJ_CONNECTION_ID' : 'LUOGU_CONNECTION_ID'] ?? `${platform.id}-lab`;
+    return connections.some(connection => connection.id === connectionId && connection.platform === platform.id && connection.state === 'auth_required');
+  }).map(platform => ({ platform: platform.id, name: platform.name })) };
 }
 export async function changeAdminRateLimit(platform: PlatformId, input: unknown, actorId: string) {
   const schema = z.object({ minIntervalMs: z.number().int().min(platform === 'codeforces' ? 2000 : 1000).max(60000), maxIntervalMs: z.number().int().max(60000), version: z.number().int().positive() }).strict().refine(value => value.maxIntervalMs >= value.minIntervalMs);
@@ -86,8 +95,8 @@ export async function changeAdminCollectionControl(input: unknown, actorId: stri
   return value;
 }
 export async function requestAdminSessionVerification(platform: string, actorId: string) {
-  if (platform !== 'qoj') throw new AppError('NOT_IMPLEMENTED', '洛谷请使用验证码登录', 422);
-  return collectionAdminCall(() => requestPlatformRead({ platform: 'qoj', target: '__identity__', operation: 'verify_session', maxDurationMs: 120000 }, { actorId }));
+  if (platform !== 'qoj' && platform !== 'luogu') throw new AppError('INVALID_INPUT', '该平台不需要登录', 400);
+  return collectionAdminCall(() => requestPlatformRead({ platform, target: '__identity__', operation: 'verify_session', maxDurationMs: 120000 }, { actorId }));
 }
 export async function disconnectAdminConnection(platform: string, actorId: string) {
   if (!['qoj', 'luogu'].includes(platform)) throw new AppError('INVALID_INPUT', '该平台不需要登录', 400);

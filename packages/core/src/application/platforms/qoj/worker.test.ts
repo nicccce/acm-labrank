@@ -66,6 +66,12 @@ it('classifies an expired session separately and validates collecting identity a
   expect(await worker.execute(job, new AbortController().signal)).toMatchObject({ status: 'auth_required', pages: 0, code: 'AUTH_REQUIRED' });
   await worker.close();
 });
+it.each(['submissions', 'verify_session'] as const)('reports an unauthenticated browser as auth_required during %s without manual interaction', async operation => {
+  const f = fake(async url => html(fixture('login'), url));
+  const worker = createQojReadWorker({ ...f.options, humanRetries: 0 });
+  expect(await worker.execute({ ...job, operation }, new AbortController().signal)).toMatchObject({ status: 'auth_required', code: 'AUTH_REQUIRED', collector: null, pages: 0 });
+  await worker.close();
+});
 it('bounds manual waiting even when an operator callback fails to respond', async () => {
   const f = fake(async url => html(fixture('challenge'), url));
   const worker = createQojReadWorker({ ...f.options, humanTimeoutMs: 25, onHumanInput: async () => new Promise(() => undefined) });

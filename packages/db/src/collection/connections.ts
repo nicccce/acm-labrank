@@ -30,5 +30,8 @@ export async function markReadingPermission(id: string, generation: number) {
   await getPool().query('UPDATE platform_connections SET reading_verified_at=now() WHERE id=$1 AND generation=$2', [id, generation]);
 }
 export async function setCollectionConnectionFailure(id: string, generation: number, state: 'auth_required' | 'human_input_required') {
-  await getPool().query('UPDATE platform_connections SET state=$3,updated_at=now() WHERE id=$1 AND generation=$2', [id, generation, state]);
+  await getPool().query(`UPDATE platform_connections SET state=$3,reading_verified_at=NULL,
+    collector=CASE WHEN $3='auth_required' THEN NULL ELSE collector END,
+    verified_at=CASE WHEN $3='auth_required' THEN NULL ELSE verified_at END,
+    updated_at=now() WHERE id=$1 AND generation=$2`, [id, generation, state]);
 }

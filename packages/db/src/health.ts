@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getPool } from './client';
 
 // Increment when adding a business migration. Older/newer schemas require an explicit deployment.
-export const EXPECTED_MIGRATIONS = 11;
+export const EXPECTED_MIGRATIONS = 13;
 // pg-boss 12.35.1 uses schema 43; update together with the locked library.
 export const EXPECTED_QUEUE_SCHEMA = 43;
 
@@ -20,6 +20,7 @@ export async function checkDatabaseReady(): Promise<boolean> {
     to_regclass('public.platform_login_attempts') AS login_attempts,
     to_regclass('public.collection_control') AS collection_control,
     to_regclass('public.collection_settings') AS collection_settings,
+    to_regclass('public.scoring_settings') AS scoring_settings,
     to_regclass('public.collection_platform_state') AS collection_platform_state,
     to_regclass('public.collection_reset_requests') AS collection_reset_requests,
     to_regclass('public.submissions') AS submissions,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { activateBinding, assertPersonalRunAvailable, claimSyncRun, closeDb, collectionAvailability, configuredSyncRange, createBoss, dispatchDueCollection, ensureCollectionConnection, finishPersonalBatch, getCollectionControl, getCollectionSettings, getPool, getSyncRun, initializeCollectionSettings, listPersonalSyncRuns, readSyncCursor, refreshVerifiedIdentity, seedIncrementalCheckpoint, requestPersonalSync, resetCollectionPlatforms, retryPersonalRun, saveCollectionSettings, setCollectionControl, commitPersonalPage, type BindingRow, type CollectionSettings, type FactPage } from '@acm/db/server';
+import { activateBinding, assertPersonalRunAvailable, claimSyncRun, closeDb, collectionAvailability, configuredSyncRange, createBoss, dispatchDueCollection, ensureCollectionConnection, finishPersonalBatch, getCollectionControl, getCollectionSettings, getPool, getSyncRun, initializeCollectionSettings, listPersonalSyncRuns, readSyncCursor, refreshVerifiedIdentity, seedIncrementalCheckpoint, requestPersonalSync, resetCollectionPlatforms, retryPersonalRun, saveCollectionSettings, setCollectionControl, setCollectionConnectionFailure, commitPersonalPage, type BindingRow, type CollectionSettings, type FactPage } from '@acm/db/server';
 import { getPersonalMember, requestAdminSync, readPlatform, changeAdminCollectionControl } from '../packages/core/src/application/index';
 
 if (!process.env.DATABASE_URL || !/^\/acm_personal_verify_[a-f0-9]{32}$/.test(new URL(process.env.DATABASE_URL).pathname)) throw new Error('Isolated personal verification database required');
@@ -99,7 +99,19 @@ try {
   assert.ok((await requestAdminSync({ platforms: ['luogu'] }, admin.id)).items.some(item => 'skipped' in item && item.skipped === 'NO_ACTIVE_BINDING'));
   const luogu = await binding('luogu', '123456'); await complete(luogu);
   assert.equal((await getPersonalMember(member.id, new URLSearchParams())).points, 12);
-  await pool.query("UPDATE platform_connections SET state='auth_required' WHERE id=$1", [qojConnection.id]);
+  await pool.query('UPDATE platform_connections SET verified_at=now(),reading_verified_at=now() WHERE id=$1', [qojConnection.id]);
+  const beforeExpiry = await ensureCollectionConnection(qojConnection.id, 'qoj');
+  await setCollectionConnectionFailure(qojConnection.id, beforeExpiry.generation, 'auth_required');
+  const expired = await ensureCollectionConnection(qojConnection.id, 'qoj');
+  assert.equal(expired.state, 'auth_required'); assert.equal(expired.collector, null);
+  assert.equal(expired.verifiedAt, null); assert.equal(expired.readingVerifiedAt, null);
+  // A delayed failure from the expired generation cannot erase a newer login.
+  await pool.query("UPDATE platform_connections SET generation=generation+1,state='ready',collector='NewCollector',verified_at=now() WHERE id=$1", [qojConnection.id]);
+  await setCollectionConnectionFailure(qojConnection.id, beforeExpiry.generation, 'auth_required');
+  const relogged = await ensureCollectionConnection(qojConnection.id, 'qoj');
+  assert.equal(relogged.state, 'ready'); assert.equal(relogged.collector, 'NewCollector');
+  await setCollectionConnectionFailure(qojConnection.id, relogged.generation, 'auth_required');
+  checks.push('expired session clears old identity and permissions without erasing a newer login');
   assert.equal((await getPersonalMember(member.id, new URLSearchParams())).points, 12);
   const mixed = await requestAdminSync({}, admin.id);
   assert.ok(mixed.items.some(item => 'platform' in item && item.platform === 'qoj' && 'skipped' in item && item.skipped === 'AUTH_REQUIRED'));

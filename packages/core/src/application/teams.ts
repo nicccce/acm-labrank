@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { archiveTeamRecord, createTeamRecord, deleteTeamRecord, getCollectionSettings, getTeamMembers, getTeamMembersBatch, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
+import { archiveTeamRecord, createTeamRecord, deleteTeamRecord, getTeamMembers, getTeamMembersBatch, getTeamRecord, leaveTeamRecord, listTeamRecords, queryCoverage, queryTeamContributions, queryTeamLeaderboard, queryTeamLeaderboardCount, queryTeamScore, searchMembers, TeamStateError, updateTeamRecord } from '@acm/db/server';
 import { displayName } from '../domain';
 import { AppError } from './errors';
-import { parsePersonalQuery, queryMeta } from './scores/query';
+import { loadScoreQuery, queryMeta } from './scores/query';
 
 const id = z.uuid().transform(v => v.toLowerCase());
 export const createTeamSchema = z.object({ name: z.string().trim().min(1).max(64), memberIds: z.array(id).min(2).max(3) }).strict();
@@ -50,13 +50,13 @@ export async function getTeamProfile(teamId: string) {
   return { ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: members.map(m => ({ id: m.id, username: m.username, displayName: displayName(m), active: m.active })) };
 }
 export async function getTeamDetail(teamId: string, params: URLSearchParams) {
-  const team = await getTeamProfile(teamId), parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
+  const team = await getTeamProfile(teamId), parsed = await loadScoreQuery(params);
   const [score, contributions, coverage] = await Promise.all([queryTeamScore(team.id, parsed.query), queryTeamContributions(team.id, parsed.query), queryCoverage(parsed.query.platforms, team.members.map(m => m.id))]);
   return { ...queryMeta(parsed, coverage), team, points: score.points, solveCount: score.solveCount, platformSolveCounts: score.platformSolveCounts, lastAcAt: score.lastAcAt, rank: score.rank,
     members: team.members.map(member => { const c = contributions.find(c => c.id === member.id); return { ...member, points: c?.points ?? 0, solveCount: c?.solveCount ?? 0, platformSolveCounts: c?.platformSolveCounts ?? { codeforces: 0, luogu: 0, qoj: 0 }, lastAcAt: c?.lastAcAt ?? null }; }) };
 }
 export async function getTeamLeaderboard(params: URLSearchParams) {
-  const parsed = parsePersonalQuery(params, new Date(), await getCollectionSettings());
+  const parsed = await loadScoreQuery(params);
   const rows = await queryTeamLeaderboard(parsed.query);
   const grouped = await getTeamMembersBatch(rows.map(r => r.id));
   const rosters = rows.map(r => grouped.get(r.id)!);

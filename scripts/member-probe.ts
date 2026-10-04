@@ -39,10 +39,24 @@ try {
   await saveMemberProfile(a, { realName: '甲同学' }); assert.equal((await getPersonalMember(a, query())).member.displayName, '甲同学');
   assert.equal((await getMembers(new URLSearchParams({ q: '甲同学' }))).items[0]!.id, a);
   assert.equal((await getMembers(new URLSearchParams({ q: 'MemberFixtureA' }))).items[0]!.id, a);
+  assert.equal((await getMembers(new URLSearchParams({ q: 'member_b' }))).items[0]!.id, b);
+  assert.equal((await getMembers(new URLSearchParams({ q: 'memberfixturec' }))).items[0]!.id, c);
+  assert.equal((await getMembers(new URLSearchParams({ q: '12345' }))).items[0]!.id, c);
+  await pool.query('UPDATE platform_accounts SET external_id=$2 WHERE id=$1', [cl, 'lg_uid_12345']);
+  assert.equal((await getMembers(new URLSearchParams({ q: 'lg_uid_12345' }))).items[0]!.id, c);
+  assert.equal((await getMembers(new URLSearchParams({ q: 'MemberFixture' }))).total, 3);
+  // Several bound platform accounts matching one query still return one member.
+  await pool.query('UPDATE platform_accounts SET handle=$2 WHERE id=$1', [cl, 'MemberFixtureCLuogu']);
+  const bothPlatforms = await getMembers(new URLSearchParams({ q: 'MemberFixtureC' }));
+  assert.equal(bothPlatforms.total, 1); assert.equal(bothPlatforms.items.length, 1);
+  await pool.query('UPDATE platform_accounts SET handle=$2 WHERE id=$1', [cl, '12345']);
+  await pool.query("UPDATE platform_bindings SET candidate='UnverifiedSearchCandidate',candidate_state='pending' WHERE user_id=$1 AND platform='qoj'", [c]);
+  assert.equal((await getMembers(new URLSearchParams({ q: 'UnverifiedSearchCandidate' }))).total, 0);
+  await pool.query("UPDATE platform_bindings SET candidate=NULL,candidate_state=NULL WHERE user_id=$1 AND platform='qoj'", [c]);
   assert.equal((await getMembers(new URLSearchParams({ q: '%' }))).total, 0);
   assert.equal((await getMembers(new URLSearchParams({ page: '999' }))).total, 7);
   await saveMemberProfile(a, { realName: null }); assert.equal((await getPersonalMember(a, query())).member.displayName, 'MemberFixtureA');
-  checks.push('real-name and CF fallback, safe member search, first-AC boundaries and detail ranks');
+  checks.push('real-name and CF fallback, multi-platform member search with unique results and verified accounts only, first-AC boundaries and detail ranks');
   const concurrent = await Promise.all([createTeam(a, { name: 'AB', memberIds: [a, b] }), createTeam(b, { name: 'BA', memberIds: [b.toUpperCase(), a.toUpperCase()] })]);
   assert.equal(concurrent[0]!.id, concurrent[1]!.id); assert.equal(concurrent.filter(t => t.created).length, 1);
   const ab = concurrent[0]!.id;

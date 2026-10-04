@@ -113,7 +113,10 @@ export async function listTeamRecords(userId: string | null, archived: boolean, 
 }
 export async function searchMembers(search: string, limit: number, offset: number) {
   const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
-  const where = `u.active AND (u.username ILIKE $1 OR u.real_name ILIKE $1 OR a.handle ILIKE $1)`;
+  const where = `u.active AND (u.username ILIKE $1 OR u.real_name ILIKE $1 OR EXISTS (
+    SELECT 1 FROM platform_bindings pb JOIN platform_accounts pa ON pa.id=pb.account_id AND pa.platform=pb.platform
+    WHERE pb.user_id=u.id AND pb.platform IN ('codeforces','luogu','qoj') AND (pa.handle ILIKE $1 OR pa.external_id ILIKE $1)
+  ))`;
   const from = `FROM users u LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id`;
   const rows = (await getPool().query<TeamMemberRow>(`SELECT u.id,u.username,u.real_name AS "realName",a.handle AS "verifiedCfHandle",u.active ${from} WHERE ${where} ORDER BY u.username,u.id LIMIT $2 OFFSET $3`, [pattern, limit, offset])).rows;
   const total = (await getPool().query<{ total: number }>(`SELECT count(*)::int AS total ${from} WHERE ${where}`, [pattern])).rows[0]!.total;

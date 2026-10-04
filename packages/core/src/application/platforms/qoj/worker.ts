@@ -85,7 +85,7 @@ export function createQojReadWorker(options: QojWorkerOptions) {
       if (options.transport === 'browser' && !runtime) runtime = await (options.browserFactory ?? createQojBrowserRequestContext)({ ...options.browser, keepBrowserSession: attachmentConfirmed, connectionId: options.connectionId, signal: lifetimeSignal });
       const raw = runtime?.scopedContext(signal, generation, beforeRequest) ?? await (options.nodeFactory ?? createQojRequestContext)({ connectionId: options.connectionId, signal, timeoutMs: options.browser?.timeoutMs, maxRetries: options.browser?.maxRetries, memoryStore: options.browser?.memoryStore, expectedGeneration: generation, beforeRequest });
       async function human(kind: QojHumanInput['kind'], url: URL, requestSignal: AbortSignal) {
-        if (!runtime || options.browser?.headed === false || !options.onHumanInput || humanAttempts++ >= humanRetries) throw new ConnectorError(kind === 'login' && !runtime ? 'AUTH_REQUIRED' : 'CHALLENGE_REQUIRED', 'QOJ requires human input; committed progress retained');
+        if (!runtime || options.browser?.headed === false || !options.onHumanInput || humanAttempts++ >= humanRetries) throw new ConnectorError(kind === 'login' ? 'AUTH_REQUIRED' : 'CHALLENGE_REQUIRED', 'QOJ requires human input; committed progress retained');
         const controller = new AbortController();
         const waitingSignal = AbortSignal.any([requestSignal, controller.signal]);
         const timer = setTimeout(() => { humanTimedOut = true; controller.abort(new ConnectorError('TIMEOUT', 'QOJ human input timed out')); }, humanTimeout);

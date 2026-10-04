@@ -6,6 +6,7 @@ import { JobsPanel } from './collection/jobs-panel';
 import { PlatformPanel } from './collection/platform-panel';
 import { SettingsPanel } from './collection/settings-panel';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { ConnectionAlertBanner } from './connection-alert-banner';
 
 import type { Platform, Range, Settings, Rate, PlatformInfo, Jobs, Leaderboard, Initial, DispatchResult } from '@acm/core/contracts';
 import { platformNames as labels } from '@acm/connectors/metadata';
@@ -53,6 +54,7 @@ export function CollectionManager({ csrfToken, initial }: { csrfToken: string; i
   }
   const setRange = (range: Range) => setDraft({ ...draft, scoreRange: range });
   const selectedSummary = settings.items.filter(item => resetPlatforms.includes(item.platform));
+  const expiredPlatforms = platforms.filter(platform => settings.platforms.includes(platform.platform) && platform.connection.state === 'auth_required');
   function dialogKeys(event: KeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape' && !busy) { setReset(null); return; }
     if (event.key !== 'Tab') return;
@@ -66,6 +68,7 @@ export function CollectionManager({ csrfToken, initial }: { csrfToken: string; i
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">数据同步</h2><p className="mt-2 text-sm text-slate-600">{control.enabled ? '运行中' : '已暂停'}</p></div><button className={button} disabled={busy} onClick={() => void action(async () => { setControl(await call('/api/admin/collection-control', 'PUT', { enabled: !control.enabled, version: control.version })); setMessage(control.enabled ? '采集已暂停，已入库数据保留。' : '采集已恢复。'); })}>{control.enabled ? '暂停采集' : '启用采集'}</button></div>
       <div className="mt-5 flex flex-wrap gap-3"><button className={primary} disabled={busy || !control.enabled || !settings.platforms.length} onClick={() => void action(async () => { const result = await call<DispatchResult>('/api/admin/sync', 'POST', {}); setMessage(outcome(result)); })}>立即同步</button><button className={button} disabled={busy} onClick={() => void action(async () => { const data = await refresh(); setDraft(data.settings); setRates(Object.fromEntries(data.platforms.map(p => [p.platform, p.rateLimit])) as Record<Platform, Rate>); setMessage('已重新读取最新设置。'); })}>刷新设置</button></div>
       <p role="status" aria-live="polite" className="mt-4 min-h-5 text-sm text-blue-800">{busy ? '正在处理，请稍候…' : message}</p>{pollError && <p role="alert" className="mt-2 text-sm text-red-700">自动刷新失败：{pollError}</p>}
+      <ConnectionAlertBanner items={expiredPlatforms} className="mt-3" />
     </section>
     <details className="disclosure"><summary>同步与计分设置</summary><SettingsPanel draft={draft} settings={settings} busy={busy} leaderboard={leaderboard} setDraft={setDraft} setRange={setRange} save={() => void action(async () => { const result = await call<{ settings: Settings } & DispatchResult>('/api/admin/collection-settings', 'PUT', { platforms: draft.platforms, autoSyncEnabled: draft.autoSyncEnabled, syncIntervalMinutes: draft.syncIntervalMinutes, scoreRange: draft.scoreRange, version: draft.version }); setDraft({ ...draft, ...result.settings }); setMessage(`设置已保存。${outcome(result)}`); })} />
     </details><PlatformPanel platforms={platforms} settings={settings} rates={rates} busy={busy} setRates={setRates} saveRate={platformId => void action(async () => { const updated = await call<Rate>(`/api/admin/platforms/${platformId}/rate-limit`, 'PATCH', { minIntervalMs: rates[platformId].minIntervalMs, maxIntervalMs: rates[platformId].maxIntervalMs, version: rates[platformId].version }); setRates(current => ({ ...current, [platformId]: updated })); setMessage(`${labels[platformId]}请求间隔已保存。`); })} />

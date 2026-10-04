@@ -159,6 +159,13 @@ export const siteSettings = pgTable('site_settings', {
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
 }, t => [check('site_settings_values', sql`${t.id}=1 AND ${t.version}>0 AND length(${t.headerText})<=80 AND length(${t.loginText})<=800`)]);
 
+export const scoringSettings = pgTable('scoring_settings', {
+  id: integer('id').primaryKey(), rules: jsonb('rules').notNull(),
+  version: integer('version').default(1).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+}, t => [check('scoring_settings_values', sql`${t.id}=1 AND ${t.version}>0`)]);
+
 export const platformLoginAttempts = pgTable('platform_login_attempts', {
   id: uuid('id').primaryKey(), sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
   connectionId: text('connection_id').notNull().references(() => platformConnections.id), generation: integer('generation').notNull(),

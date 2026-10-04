@@ -85,6 +85,13 @@
       "when": 1791091031920,
       "tag": "0011_same_masked_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791116802183,
+      "tag": "0012_scoring_settings",
+      "breakpoints": true
     }
   ]
 }

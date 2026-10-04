@@ -20,7 +20,12 @@ export async function loadPage<T>(fn: () => Promise<T>): Promise<{ data: T; erro
 export async function scorePlatforms() { return getScorePlatforms(); }
 export async function MemberShell({ session, title, children }: { session: Awaited<ReturnType<typeof currentSession>>; title: string; children: React.ReactNode }) {
   const settings = await getSiteSettings();
-  return <div className="member-main"><a className="skip-link" href="#main-content">跳至内容</a><header className="member-header"><div className="brand-slot">{settings.headerText && <Link href="/" className="brand" aria-label="榜单首页">{settings.headerText}</Link>}</div><MemberNav userId={session?.user.id} name={session?.user.displayName} admin={session?.user.role === 'admin'} csrfToken={session?.csrfToken} /></header>
-    <main id="main-content"><PageHeading title={title} />{children}</main><footer className="site-footer"><span>ACM LAB</span><span className="footer-shapes" aria-hidden="true">● ◒ ■</span><span>每一次 AC，都算数。</span></footer></div>;
+  return <div className="member-main"><a className="skip-link" href="#main-content">跳至内容</a><header className="member-header"><div className="brand-slot">{settings.headerText && <Link href="/" className="brand" aria-label="榜单首页"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span>{settings.headerText}</span></Link>}</div><MemberNav userId={session?.user.id} name={session?.user.displayName} admin={session?.user.role === 'admin'} csrfToken={session?.csrfToken} /></header>
+    <main id="main-content"><PageHeading title={title} />{children}</main>
+    <footer className="site-footer">
+      <div className="footer-project">{settings.headerText && <span>{settings.headerText}</span>}<span>用于汇总训练记录与积分，非各 OJ 官方排名。</span></div>
+      <span className="footer-shapes" aria-hidden="true">● ◒ ■</span>
+      <div className="footer-links"><a href="https://github.com/nicccce/acm-labrank" target="_blank" rel="noopener noreferrer">GitHub ↗</a>{settings.loginText && <span className="footer-login-text">{settings.loginText}</span>}</div>
+    </footer></div>;
 }
 export function PageError({ message }: { message: string }) { return <p role="alert" className="error">{message}</p>; }

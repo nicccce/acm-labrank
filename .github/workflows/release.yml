@@ -54,6 +54,8 @@ jobs:
         run: pnpm check
       - name: Previous-version data preservation and database regressions
         run: |
+          export SESSION_ENCRYPTION_KEY_FILE="$RUNNER_TEMP/acm-release-fixture-key"
+          node --input-type=module -e "import {randomBytes} from 'node:crypto'; import {writeFileSync} from 'node:fs'; writeFileSync(process.env.SESSION_ENCRYPTION_KEY_FILE,randomBytes(32).toString('hex'),{mode:0o600});"
           pnpm upgrade:verify
           pnpm teams:verify
           pnpm users:verify

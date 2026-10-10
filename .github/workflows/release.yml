@@ -94,6 +94,7 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           docker run --rm --network host --shm-size=1g --entrypoint pnpm \
+            --tmpfs /app/.local:rw,nosuid,nodev,size=32m,uid=1000,gid=1000,mode=0700 \
             -e DATABASE_URL -e VERIFY_BROWSER_CHANNEL=chromium \
             -e VERIFY_BROWSER_EXECUTABLE=/usr/bin/chromium \
             "$IMAGE:worker-$VERSION" users:verify --http

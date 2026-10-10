@@ -6,7 +6,7 @@ import { loadScoreQuery, queryMeta } from './query';
 export async function getPersonalLeaderboard(params: URLSearchParams) {
   const parsed = await loadScoreQuery(params);
   const [rows, coverage] = await Promise.all([queryLeaderboard(parsed.query), queryCoverage(parsed.query.platforms)]);
-  return { ...queryMeta(parsed, coverage), total: rows[0]?.total ?? await queryLeaderboardCount(), items: rows.map(r => ({ id: r.id, displayName: displayName(r), points: r.points, solveCount: r.solveCount, platformSolveCounts: r.platformSolveCounts, lastAcAt: r.lastAcAt, rank: r.rank })) };
+  return { ...queryMeta(parsed, coverage), total: rows[0]?.total ?? await queryLeaderboardCount(), items: rows.map(r => ({ id: r.id, displayName: displayName(r), isStarred: r.isStarred, points: r.points, solveCount: r.solveCount, platformSolveCounts: r.platformSolveCounts, lastAcAt: r.lastAcAt, rank: r.rank })) };
 }
 export async function getPersonalMember(id: string, params: URLSearchParams) {
   const member = await getMemberProfile(id), parsed = await loadScoreQuery(params);

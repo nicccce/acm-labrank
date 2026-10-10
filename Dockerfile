@@ -22,7 +22,7 @@ FROM base AS runtime
 ENV NODE_ENV=production
 ENV TZ=UTC
 ARG VCS_REF=unknown
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=1.1.0
 LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision=$VCS_REF \
@@ -46,7 +46,7 @@ FROM browser-system AS worker-browser
 ENV NODE_ENV=production
 ENV TZ=UTC
 ARG VCS_REF=unknown
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=1.1.0
 LABEL org.opencontainers.image.source="https://github.com/nicccce/acm-labrank" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision=$VCS_REF \

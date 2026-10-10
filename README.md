@@ -4,10 +4,13 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 
 ## 文档入口
 
+用户和队伍可独立打星：榜单按成绩穿插显示灰色小字号记录，排名标为 `*`，不占正式名次。管理员在 `/admin/users` 修改姓名、封禁／解封、伪删除／恢复和重置密码，在 `/admin/teams` 管理队伍打星；随机临时密码仅展示一次，下次登录强制修改。账号伪删除保留绑定、成绩和队伍关系。
+
 本站队伍不设负责人，创建者和其他成员权限平等；每位当前成员都能增删成员、改名、归档和删除队伍。成员集合相同即为同一支队伍，成员顺序和队名不影响去重，已归档队伍也计入唯一性检查。
 
 - [文档索引](docs/README.md)：当前维护文档与历史记录。
 - [部署与运维](docs/部署与运维.md)：镜像部署、源码打包、QOJ 浏览器、备份、升级与故障排查。
+- [升级到 1.1.0](docs/升级到1.1.0.md)：从 1.0.0 保留数据更新的服务器命令及失败处理。
 - [个人后端与 Web 登录](docs/个人后端与Web登录.md)：本轮 API、管理员交接、采集开关和离线集成验证。
 - [成员页面与团队榜](docs/成员页面与团队榜.md)：页面、团队计分、去重和接口。
 - [管理员采集管理](docs/管理员采集管理.md)：管理页、定时增量、计分区间、平台选择和局部重爬。
@@ -18,7 +21,7 @@ pnpm workspace 项目，包含 Next.js Web、独立 worker、PostgreSQL / Drizzl
 
 ## 部署方式一：Compose 直接拉取镜像
 
-需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `1.0.0`，发布平台为 `linux/amd64`。应用镜像 `1.0.0` 负责 Web、迁移及管理员初始化；通用采集镜像 `worker-1.0.0` 同时负责 Codeforces、洛谷和 QOJ，并内置 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
+需要 Docker Linux 引擎和 Compose v2。镜像仓库为 [nicccce/acm-labrank](https://hub.docker.com/r/nicccce/acm-labrank)，当前版本 `1.1.0`，发布平台为 `linux/amd64`。应用镜像 `1.1.0` 负责 Web、迁移及管理员初始化；通用采集镜像 `worker-1.1.0` 同时负责 Codeforces、洛谷和 QOJ，并内置 Chromium/noVNC。镜像内置 Node.js 24.21.0 和 pnpm 11.19.0，服务器无需安装 Node.js 或 pnpm。
 
 Linux 服务器执行：
 
@@ -27,7 +30,7 @@ git clone https://github.com/nicccce/acm-labrank.git
 cd acm-labrank
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$PWD,target=/deployment" \
-  --entrypoint node nicccce/acm-labrank:1.0.0 \
+  --entrypoint node nicccce/acm-labrank:1.1.0 \
   scripts/setup.mjs --directory /deployment
 # 编辑 .env：本地测试保留 APP_URL；公网部署设为实际 HTTPS 地址
 docker compose pull
@@ -111,6 +114,7 @@ pnpm dev
 | `pnpm queue:probe` | 真实数据库下的基础队列验证 |
 | `pnpm collection:probe` | 独立测试库下的采集集成验证；限制见采集文档 |
 | `pnpm personal:verify` | 独立测试库验证个人事实、登录、配置、调度和局部重爬；`--http` 在含 Chromium 镜像额外验证 HTTP 和页面 |
+| `pnpm users:verify` | 独立测试库验证打星排名、用户状态、队伍占位、密码重置、并发保护和队列取消；`--http` 额外验证 HTTP 与桌面／窄屏浏览器流程 |
 | `pnpm members:seed` | 幂等创建测试成员及三平台候选，不重置已有密码 |
 | `pnpm verify:smoke` | HTTP 验证，会创建临时 member |
 
@@ -134,7 +138,9 @@ Compose 按 `db healthy → migrate 成功 → bootstrap 成功 → web / worker
 
 认证入口为 `/api/auth/register`、`login`、`session`、`logout`。写请求校验 Origin；退出及管理员写接口还校验 `X-CSRF-Token`。密码用 Argon2id，会话 token 仅以哈希入库，Cookie 使用 HttpOnly/SameSite=Lax；HTTPS 时 Secure。
 
-发布包含新迁移的版本时，先备份、暂停采集并等待活动任务结束，再按[升级流程](docs/部署与运维.md)部署匹配的新 Web/worker。保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)替换 Node worker，保持容器及 Chromium 运行。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
+从上一版保留数据升级：先暂停采集、等待任务结束，保留原 `.env/.secrets` 和数据库卷；按[升级流程](docs/部署与运维.md)准备新版源码及匹配镜像，执行 `node scripts/update.mjs --check`，再执行 `node scripts/update.mjs`（源码镜像方式均追加 `--build`）。脚本自动备份并校验、执行尚未完成的增量迁移、启动匹配的新 Web/worker；新列为旧记录填默认值，重复执行不覆盖已有设置。`pnpm db:migrate --check` 可单独检查迁移，`pnpm upgrade:verify` 验证上一版旧库升级。
+
+保留现有 QOJ 浏览器时，按[原位更新流程](docs/个人后端与Web登录.md)备份、迁移并替换 Node worker，保持容器及 Chromium 运行；常规更新脚本会更换 Worker，可能需要重新登录。停止 Compose 默认保留数据库命名卷。当前源码是否已部署应由实际镜像和 readiness 确认，历史验收记录不代表运行环境自动更新。
 
 当前采集策略：首次近 30 天、每批 3 页/120 秒，之后持续增量；榜单日期只控制查询，历史补采单独执行。结构与功能缺口见[项目实现状态](docs/项目实现状态.md)。
 

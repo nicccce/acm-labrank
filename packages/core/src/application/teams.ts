@@ -3,6 +3,8 @@ import { archiveTeamRecord, createTeamRecord, deleteTeamRecord, getTeamMembers, 
 import { displayName } from '../domain';
 import { AppError } from './errors';
 import { loadScoreQuery, queryMeta } from './scores/query';
+import { setTeamStarRecord, listManagedTeamRecords } from '@acm/db/server';
+import { managementInput, managementListSchema, starSchema } from './user-management';
 
 const id = z.uuid().transform(v => v.toLowerCase());
 export const createTeamSchema = z.object({ name: z.string().trim().min(1).max(64), memberIds: z.array(id).min(2).max(3) }).strict();
@@ -47,7 +49,7 @@ export async function leaveTeam(teamId: string, actorId: string, input: unknown)
 export async function getTeamProfile(teamId: string) {
   const team = await getTeamRecord(validId(teamId)); if (!team) throw new AppError('TEAM_NOT_FOUND', '队伍不存在', 404);
   const members = await getTeamMembers(team.id);
-  return { ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: members.map(m => ({ id: m.id, username: m.username, displayName: displayName(m), active: m.active })) };
+  return { ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: members.map(m => ({ id: m.id, username: m.username, displayName: m.deleted ? '已删除成员' : displayName(m), active: m.active, deleted: m.deleted })) };
 }
 export async function getTeamDetail(teamId: string, params: URLSearchParams) {
   const team = await getTeamProfile(teamId), parsed = await loadScoreQuery(params);
@@ -63,7 +65,7 @@ export async function getTeamLeaderboard(params: URLSearchParams) {
   const allCoverage = await queryCoverage(parsed.query.platforms, [...new Set(rosters.flatMap(members => members.map(m => m.id)))]);
   const items = rows.map((r, i) => {
     const members = rosters[i]!, coverage = allCoverage.filter(c => members.some(m => m.id === c.userId));
-    return { id: r.id, name: r.name, rank: r.rank, points: r.points, solveCount: r.solveCount, platformSolveCounts: r.platformSolveCounts, lastAcAt: r.lastAcAt, provisional: queryMeta(parsed, coverage).provisional, members: members.map(m => ({ id: m.id, displayName: displayName(m) })) };
+    return { id: r.id, name: r.name, isStarred: r.isStarred, rank: r.rank, points: r.points, solveCount: r.solveCount, platformSolveCounts: r.platformSolveCounts, lastAcAt: r.lastAcAt, provisional: queryMeta(parsed, coverage).provisional, members: members.map(m => ({ id: m.id, displayName: m.deleted ? '已删除成员' : displayName(m) })) };
   });
   return { ...queryMeta(parsed, allCoverage), total: rows[0]?.total ?? await queryTeamLeaderboardCount(), items };
 }
@@ -72,7 +74,20 @@ export async function getTeams(params: URLSearchParams, viewerId: string) {
   if (!parsed.success) throw new AppError('INVALID_INPUT', '队伍列表参数不合法', 400);
   const { page, limit } = parsed.data, result = await listTeamRecords(parsed.data.mine === '1' ? viewerId : null, parsed.data.status === 'archived', limit, (page - 1) * limit);
   const grouped = await getTeamMembersBatch(result.rows.map(r => r.id));
-  return { page, limit, total: result.total, items: result.rows.map(team => ({ ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: grouped.get(team.id)!.map(m => ({ id: m.id, username: m.username, displayName: displayName(m), active: m.active })) })) };
+  return { page, limit, total: result.total, items: result.rows.map(team => ({ ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: grouped.get(team.id)!.map(m => ({ id: m.id, username: m.username, displayName: m.deleted ? '已删除成员' : displayName(m), active: m.active, deleted: m.deleted })) })) };
+}
+export async function setTeamStar(teamId: string, actorId: string, raw: unknown, asAdmin = false) {
+  const input = managementInput(starSchema.extend({ version: z.number().int().positive() }), raw);
+  return call(async () => {
+    const team = await setTeamStarRecord(validId(teamId), actorId, input, asAdmin);
+    return { ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null };
+  });
+}
+export async function getManagedTeams(params: URLSearchParams) {
+  const input = managementInput(managementListSchema.extend({ status: z.enum(['all', 'active', 'archived']).default('active') }), Object.fromEntries(params));
+  const result = await listManagedTeamRecords({ ...input, offset: (input.page - 1) * input.limit });
+  const grouped = await getTeamMembersBatch(result.rows.map(r => r.id));
+  return { page: input.page, limit: input.limit, total: result.total, items: result.rows.map(team => ({ ...team, createdAt: team.createdAt.toISOString(), archivedAt: team.archivedAt?.toISOString() ?? null, members: grouped.get(team.id)!.map(m => ({ displayName: m.deleted ? '已删除成员' : displayName(m) })) })) };
 }
 export async function getMembers(params: URLSearchParams) {
   const parsed = z.object({ q: z.string().trim().max(64).default(''), page: z.coerce.number().int().min(1).max(100000).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict().safeParse(Object.fromEntries(params));

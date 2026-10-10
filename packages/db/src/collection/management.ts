@@ -43,7 +43,7 @@ export async function saveCollectionSettings(input: Omit<CollectionSettings, 'up
     if (old.syncIntervalMinutes !== input.syncIntervalMinutes) await client.query(`UPDATE platform_bindings b SET next_sync_at=coalesce((SELECT max(finished_at) FROM sync_runs WHERE binding_id=b.id AND kind='sync' AND status='completed'),now())+$1*interval '1 minute'
       WHERE sync_blocked IS NULL AND NOT sync_requested AND NOT EXISTS(SELECT 1 FROM sync_runs r WHERE r.binding_id=b.id AND r.status IN ('queued','running'))`, [input.syncIntervalMinutes]);
     if (!old.autoSyncEnabled && input.autoSyncEnabled) await client.query('UPDATE platform_bindings SET next_sync_at=now() WHERE account_id IS NOT NULL AND sync_blocked IS NULL');
-    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=ANY($1) AND (b.sync_requested OR ($2 AND b.next_sync_at<=now() AND b.sync_blocked IS NULL)) ORDER BY b.id FOR UPDATE OF b`, [input.platforms, input.autoSyncEnabled])).rows;
+    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.platform=ANY($1) AND (b.sync_requested OR ($2 AND b.next_sync_at<=now() AND b.sync_blocked IS NULL)) ORDER BY b.id FOR UPDATE OF b`, [input.platforms, input.autoSyncEnabled])).rows;
     const schedulingChanged = affected.length > 0 || old.autoSyncEnabled !== input.autoSyncEnabled || old.syncIntervalMinutes !== input.syncIntervalMinutes;
     const items = schedulingChanged ? await dispatchBindings(client, boss, bindings, 'settings', actorId) : [];
     await client.query("INSERT INTO collection_audit_logs(actor_id,action,target,details) VALUES ($1,'collection_settings_updated','collection',$2)", [actorId, JSON.stringify({ ...input, version: old.version + 1 })]);
@@ -53,7 +53,7 @@ export async function saveCollectionSettings(input: Omit<CollectionSettings, 'up
 export async function dispatchDueCollection(boss: PgBoss, now = new Date()) {
   return collectionTransaction(async client => {
     const settings = await getCollectionSettings(client);
-    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active
+    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL
       WHERE b.platform=ANY($1) AND (b.account_id IS NOT NULL OR (b.candidate IS NOT NULL AND b.candidate_state='pending'))
       AND (b.sync_requested OR ($2 AND b.sync_blocked IS NULL AND b.next_sync_at<=$3))
       AND NOT EXISTS(SELECT 1 FROM sync_runs r WHERE r.binding_id=b.id AND r.status IN ('queued','running'))
@@ -63,12 +63,12 @@ export async function dispatchDueCollection(boss: PgBoss, now = new Date()) {
 }
 export async function collectionPlatformSummary() {
   return (await getPool().query(`SELECT p.platform,p.generation,
-    (SELECT count(*)::int FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=p.platform AND b.account_id IS NOT NULL) AS "bindingCount",
+    (SELECT count(*)::int FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.platform=p.platform AND b.account_id IS NOT NULL) AS "bindingCount",
     (SELECT count(*)::int FROM problems WHERE platform=p.platform) AS "problemCount",
     (SELECT count(*)::int FROM submissions WHERE platform=p.platform) AS "submissionCount",
     (SELECT max(c.last_success_at) FROM sync_cursors c JOIN platform_accounts a ON a.id=c.account_id WHERE a.platform=p.platform) AS "lastSuccessAt",
-    (SELECT min(b.next_sync_at) FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=p.platform AND b.account_id IS NOT NULL AND b.sync_blocked IS NULL) AS "nextSyncAt",
-    (SELECT count(*)::int FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=p.platform AND b.sync_blocked IS NOT NULL) AS "blockedCount"
+    (SELECT min(b.next_sync_at) FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.platform=p.platform AND b.account_id IS NOT NULL AND b.sync_blocked IS NULL) AS "nextSyncAt",
+    (SELECT count(*)::int FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.platform=p.platform AND b.sync_blocked IS NOT NULL) AS "blockedCount"
     FROM collection_platform_state p ORDER BY p.platform`)).rows;
 }
 export async function resetCollectionPlatforms(input: { platforms: string[]; version: number; requestId: string }, actorId: string, boss: PgBoss) {
@@ -82,7 +82,7 @@ export async function resetCollectionPlatforms(input: { platforms: string[]; ver
     const settings = await getCollectionSettings(client);
     if (settings.version !== input.version) throw new Error('VERSION_CONFLICT');
     // Preflight every selected platform before deleting any facts.
-    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.platform=ANY($1) AND b.account_id IS NOT NULL ORDER BY b.id FOR UPDATE OF b`, [input.platforms])).rows;
+    const bindings = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.platform=ANY($1) AND b.account_id IS NOT NULL ORDER BY b.id FOR UPDATE OF b`, [input.platforms])).rows;
     for (const platform of input.platforms) {
       const available = await collectionAvailability(platform, client);
       if (available.reason) throw new Error(available.reason);

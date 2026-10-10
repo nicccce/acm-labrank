@@ -20,7 +20,7 @@ export async function saveConnectorSession(id: string, platform: string, encrypt
     }
     if (promotion?.attempt) {
       const a = promotion.attempt;
-      const active = await client.query(`SELECT a.id FROM platform_login_attempts a JOIN sessions s ON s.id=a.session_id JOIN users u ON u.id=s.user_id WHERE a.id=$1 AND a.version=$2 AND a.session_id=$3 AND a.state='processing' AND a.expires_at>clock_timestamp() AND a.connection_id=$4 AND a.generation=$5 AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND u.active AND u.role='admin' FOR UPDATE OF a,s,u`, [a.id, a.version, a.sessionId, logicalId, expectedGeneration]);
+      const active = await client.query(`SELECT a.id FROM platform_login_attempts a JOIN sessions s ON s.id=a.session_id JOIN users u ON u.id=s.user_id WHERE a.id=$1 AND a.version=$2 AND a.session_id=$3 AND a.state='processing' AND a.expires_at>clock_timestamp() AND a.connection_id=$4 AND a.generation=$5 AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND u.active AND u.deleted_at IS NULL AND u.role='admin' FOR UPDATE OF a,s,u`, [a.id, a.version, a.sessionId, logicalId, expectedGeneration]);
       if (active.rowCount !== 1) throw new Error('LOGIN_ATTEMPT_STALE');
     }
     signal?.throwIfAborted();

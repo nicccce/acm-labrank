@@ -2,6 +2,16 @@
 
 已实现三平台个人绑定、按需同步、正式事实存储及查询 API。管理员采集配置见[管理员采集管理](管理员采集管理.md)，普通成员页面、姓名编辑、队伍管理与团队榜见[成员页面与团队榜](成员页面与团队榜.md)；独立比赛/VP、外站队伍绑定和归属纠正后续实施。2026-10-03 管理员完成登录并确认后，已验证三平台两页真实列表的作者、分页、时间、原始判题和当前采集身份，随后热启用提交采集，验证正式入库、重复请求合并及独立批次自动续投。
 
+## 用户管理与密码重置
+
+管理员通过 `/admin/users` 按用户名、姓名、状态和打星筛选用户，修改姓名、打星／取消、封禁／解封、伪删除／恢复及重置密码；`/admin/teams` 提供队伍名称、归档状态和打星筛选。管理员可管理其他管理员，不提供角色分配；禁止封禁或删除自己、最后一名可用管理员。已删除账号只允许恢复，用户名和平台绑定继续占用。
+
+封禁使用 `active=false`，伪删除使用独立 `deletedAt`，恢复仅清除删除时间，保留原封禁、打星及强制改密状态。停用时撤销全部会话、取消未完成采集和 pg-boss 任务；恢复有效账号后标记绑定等待验证／同步。所有写操作校验 Origin 和 CSRF，并记录不含密码及哈希的操作事件。
+
+管理接口为 `GET /api/admin/users`、`PATCH/DELETE /api/admin/users/:id`、`POST .../restore`、`POST .../reset-password`，以及 `GET /api/admin/teams`、`PUT /api/admin/teams/:id/star`。列表参数为 `q/status/starred/page/limit`；用户状态为 `all/active/banned/deleted`，队伍状态为 `all/active/archived`，打星筛选为 `all/1/0`，默认有效记录、每页 20 条，最多 100 条。PATCH 只接受 `realName/active/isStarred`。
+
+重置密码生成 24 字符随机临时密码，响应仅本次返回 `temporaryPassword`，不提供再次查询；丢失时重新重置。用户登录后 `mustChangePassword=true`，跳转 `/change-password`；受保护接口返回 `PASSWORD_CHANGE_REQUIRED`，仅会话查询、退出和改密允许继续，公开榜单按匿名权限读取。`PUT /api/me/password` 提交 `{currentPassword,newPassword}`，新密码 12—128 位且不能复用当前密码；修改成功清除限制、撤销旧会话、签发新会话。普通用户也可从资料页主动修改密码。
+
 ## 本地交接
 
 ```powershell

@@ -1,4 +1,5 @@
 import { getPool } from '../client';
+import { assertWritableUser, updateOwnUser } from '../user-management';
 import { collectionAvailability, assertCollectionAvailable, collectionTransaction as transaction } from '../collection/settings';
 import { enqueuePersonalInTransaction } from './sync';
 import { rebuildAttributions } from './facts';
@@ -7,18 +8,19 @@ import { accountKey, type BindingRow, type SyncRow, type PersonalPlatform } from
 import type { PgBoss } from 'pg-boss';
 
 export async function memberProfile(id: string) {
-  return (await getPool().query<{ id: string; username: string; realName: string | null; verifiedCfHandle: string | null; role: 'member' | 'admin' }>(`SELECT u.id,u.username,u.real_name AS "realName",u.role,a.handle AS "verifiedCfHandle" FROM users u LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE u.id=$1 AND u.active`, [id])).rows[0] ?? null;
+  return (await getPool().query<{ id: string; username: string; realName: string | null; isStarred: boolean; verifiedCfHandle: string | null; role: 'member' | 'admin' }>(`SELECT u.id,u.username,u.real_name AS "realName",u.is_starred AS "isStarred",u.role,a.handle AS "verifiedCfHandle" FROM users u LEFT JOIN platform_bindings b ON b.user_id=u.id AND b.platform='codeforces' LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE u.id=$1 AND u.active AND u.deleted_at IS NULL`, [id])).rows[0] ?? null;
 }
-export async function updateMemberName(id: string, name: string | null) { await getPool().query('UPDATE users SET real_name=$2 WHERE id=$1', [id, name]); }
+export async function updateMemberName(id: string, name: string | null) { await updateOwnUser(id, { realName: name }); }
 export async function listBindings(userId: string) {
   return (await getPool().query(`SELECT b.*,a.handle,a.external_id,c.cursor,c.history_complete,coalesce(ci.coverage,c.coverage,'unknown') AS coverage,c.last_success_at,ci.initialized_at,(SELECT initial_from FROM sync_runs WHERE account_id=b.account_id AND scope='initial' ORDER BY created_at DESC LIMIT 1) AS initial_from,(SELECT scope FROM sync_runs WHERE binding_id=b.id AND kind='sync' ORDER BY created_at DESC LIMIT 1) AS latest_scope,(SELECT max(last_success_at) FROM sync_cursors WHERE account_id=b.account_id) AS latest_success FROM platform_bindings b LEFT JOIN platform_accounts a ON a.id=b.account_id LEFT JOIN sync_cursors c ON c.account_id=b.account_id AND c.mode='backfill' LEFT JOIN sync_cursors ci ON ci.account_id=b.account_id AND ci.mode='incremental' WHERE b.user_id=$1 ORDER BY b.platform`, [userId])).rows;
 }
 export async function getBinding(id: string): Promise<BindingRow | null> { return (await getPool().query<BindingRow>('SELECT b.*,a.handle,a.external_id FROM platform_bindings b LEFT JOIN platform_accounts a ON a.id=b.account_id WHERE b.id=$1', [id])).rows[0] ?? null; }
 export async function listSyncTargets(accountIds?: string[], platforms?: string[]): Promise<BindingRow[]> {
-  return (await getPool().query<BindingRow>(`SELECT b.*,a.handle,a.external_id FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active JOIN platform_accounts a ON a.id=b.account_id WHERE ($1::uuid[] IS NULL OR b.account_id=ANY($1)) AND ($2::text[] IS NULL OR b.platform=ANY($2)) ORDER BY b.id`, [accountIds ?? null, platforms ?? null])).rows;
+  return (await getPool().query<BindingRow>(`SELECT b.*,a.handle,a.external_id FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL JOIN platform_accounts a ON a.id=b.account_id WHERE ($1::uuid[] IS NULL OR b.account_id=ANY($1)) AND ($2::text[] IS NULL OR b.platform=ANY($2)) ORDER BY b.id`, [accountIds ?? null, platforms ?? null])).rows;
 }
 export async function saveBindingCandidate(userId: string, platform: PersonalPlatform, target: string, boss: PgBoss) {
   return transaction(async client => {
+    await assertWritableUser(client, userId);
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,73192405))', [`${userId}:${platform}`]);
     const key = accountKey(platform, target);
     const unchanged = (await client.query<BindingRow>(`SELECT b.* FROM platform_bindings b JOIN platform_account_aliases a ON a.account_id=b.account_id AND a.platform=b.platform WHERE b.user_id=$1 AND b.platform=$2 AND a.key=$3 AND b.candidate IS NULL`, [userId, platform, key])).rows[0];
@@ -36,7 +38,7 @@ export async function activateBinding(runId: string, account: { platform: string
   return transaction(async client => {
     await lockRunBinding(client, runId);
     const run = (await client.query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1 FOR UPDATE', [runId])).rows[0]!;
-    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
+    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version || run.status !== 'running') throw new Error('STALE_BINDING');
     await assertCollectionAvailable(binding.platform, run.collection_generation, client);
     if (account.kind !== 'person') throw new Error('TEAM_ACCOUNT_UNSUPPORTED');
@@ -59,6 +61,7 @@ export async function activateBinding(runId: string, account: { platform: string
 }
 export async function unbindAccount(userId: string, platform: string) {
   await transaction(async client => {
+    await assertWritableUser(client, userId);
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,73192405))', [`${userId}:${platform}`]);
     const previous = (await client.query<{ account_id: string | null }>('SELECT account_id FROM platform_bindings WHERE user_id=$1 AND platform=$2 FOR UPDATE', [userId, platform])).rows[0];
     await client.query('UPDATE platform_bindings SET account_id=NULL,candidate=NULL,candidate_state=NULL,candidate_error=NULL,version=version+1,next_sync_at=NULL,sync_requested=false,sync_blocked=NULL WHERE user_id=$1 AND platform=$2', [userId, platform]);

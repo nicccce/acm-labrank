@@ -28,7 +28,7 @@ export async function commitPersonalPage(runId: string, expectedCursorVersion: n
   return transaction(async client => {
     await lockRunBinding(client, runId);
     const run = (await client.query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1 FOR UPDATE', [runId])).rows[0]!;
-    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
+    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version || binding.account_id !== run.account_id || run.status !== 'running') throw new Error('STALE_BINDING');
     await assertCollectionAvailable(binding.platform, run.collection_generation, client);
     const enabled = await client.query('SELECT 1 FROM collection_control WHERE id=1 AND enabled FOR SHARE');

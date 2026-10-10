@@ -9,7 +9,7 @@ let passed = false;
 try {
   await getPool().query(`CREATE DATABASE "${name}"`); await closeDb();
   const target = new URL(baseUrl); target.pathname = `/${name}`; process.env.DATABASE_URL = target.href;
-  const migrate = spawnSync('pnpm', ['db:migrate'], { env: process.env, encoding: 'utf8' });
+  const migrate = spawnSync(process.execPath, ['--import', 'tsx', 'packages/db/src/migrate.ts'], { env: process.env, encoding: 'utf8' });
   if (migrate.status !== 0) throw new Error('Isolated database migration failed');
   await import('./personal-probe');
   await import('./continuous-sync-probe');

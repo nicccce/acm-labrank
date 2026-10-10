@@ -10,7 +10,10 @@ export type PlatformInfo = { platform: Platform; name: string; rateLimit: Rate; 
 export type ConnectionAlert = Pick<PlatformInfo, 'platform' | 'name'>;
 export type Job = { id: string; platform: Platform; username: string; handle: string | null; source: string; kind: string; mode: string; scope: SyncScope; initialFrom: string | null; status: string; pages: number; recordsWithOverlap: number; batch: number; range: { from: string; to: string } | null; createdAt: string; startedAt: string | null; finishedAt: string | null; error: { code?: string; message?: string } | null };
 export type Jobs = { items: Job[]; nextCursor: string | null };
-export type Leaderboard = { range: { from: string; to: string }; provisional: boolean; total: number; items: { id: string; rank: number; displayName: string; points: number; solveCount: number; lastAcAt: string | null }[] };
+export type Leaderboard = { range: { from: string; to: string }; provisional: boolean; total: number; items: { id: string; rank: number | null; isStarred: boolean; displayName: string; points: number; solveCount: number; lastAcAt: string | null }[] };
+export interface ManagedUser { id: string; username: string; realName: string | null; role: 'admin' | 'member'; active: boolean; isStarred: boolean; deletedAt: string | null; mustChangePassword: boolean; createdAt: string }
+export interface ManagedTeam { id: string; name: string; version: number; isStarred: boolean; archivedAt: string | null; createdAt: string; members: { displayName: string }[] }
+export interface ManagementPage<T> { page: number; limit: number; total: number; items: T[] }
 export type Initial = { settings: Settings; platforms: PlatformInfo[]; control: { enabled: boolean; version: number }; jobs: Jobs; leaderboard: Leaderboard };
 export type DispatchResult = { items: { runId?: string; merged?: boolean; skipped?: string; message?: string; error?: { message: string } }[] };
 

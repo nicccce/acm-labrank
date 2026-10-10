@@ -35,10 +35,11 @@ export async function readJson(request: Request) {
     throw new AppError('INVALID_JSON', 'JSON 格式错误', 400);
   } finally { reader.releaseLock(); }
 }
-export async function requireSession(request?: Request) {
+export async function requireSession(request?: Request, allowPasswordChange = false) {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const session = await getSession(token);
   if (!session || !token) throw new AppError('UNAUTHENTICATED', '请先登录', 401);
+  if (session.user.mustChangePassword && !allowPasswordChange) throw new AppError('PASSWORD_CHANGE_REQUIRED', '请先修改临时密码', 403);
   if (request && !validateCsrf(token, request.headers.get('x-csrf-token'))) {
     throw new AppError('INVALID_CSRF', '会话校验失败，请刷新页面', 403);
   }

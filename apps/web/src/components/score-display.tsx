@@ -9,8 +9,8 @@ export function Pagination({ path, params, page, limit, total }: { path: string;
   function href(n: number) { const query = new URLSearchParams(params); query.set('page', String(n)); return `${path}?${query}`; }
   return <div className="pagination"><span>{total} 条记录</span>{total > limit && <span>{page} / {Math.ceil(total / limit)}</span>}{page > 1 && <Link href={href(page - 1)}>上一页</Link>}{page * limit < total && <Link href={href(page + 1)}>下一页</Link>}</div>;
 }
-export function ScoreSummary({ points, solveCount, rank, provisional, submissionCount }: { points: number; solveCount: number; rank: number | null; provisional: boolean; submissionCount?: number }) {
-  return <div className="score-summary"><span>排名 <strong>{rank ?? '—'}</strong></span><span>积分 <strong>{formatPoints(points)}</strong></span><span>题数 <strong>{solveCount}</strong></span>{submissionCount !== undefined && <span>提交 <strong>{submissionCount}</strong></span>}{provisional && <span className="muted">暂定</span>}</div>;
+export function ScoreSummary({ points, solveCount, rank, provisional, submissionCount, isStarred = false }: { points: number; solveCount: number; rank: number | null; provisional: boolean; submissionCount?: number; isStarred?: boolean }) {
+  return <div className="score-summary"><span>排名 <strong>{isStarred ? '*' : rank ?? '—'}</strong>{isStarred && ' · 不参与排名'}</span><span>积分 <strong>{formatPoints(points)}</strong></span><span>题数 <strong>{solveCount}</strong></span>{submissionCount !== undefined && <span>提交 <strong>{submissionCount}</strong></span>}{provisional && <span className="muted">暂定</span>}</div>;
 }
 
 export function CoverageTable({ items }: { items: CoverageItem[] }) {

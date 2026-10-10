@@ -8,8 +8,26 @@ export async function findUser(username: string) {
 export async function createUser(input: { username: string; realName: string | null; passwordHash: string }) {
   return (await getDb().insert(users).values(input).returning())[0]!;
 }
-export async function createSession(userId: string, tokenHash: string, expiresAt: Date) {
-  await getDb().insert(sessions).values({ userId, tokenHash, expiresAt });
+export async function createSession(userId: string, tokenHash: string, expiresAt: Date, expectedPasswordHash?: string) {
+  return getDb().transaction(async tx => {
+    const user = (await tx.select().from(users).where(eq(users.id, userId)).for('update'))[0];
+    if (!user?.active || user.deletedAt || (expectedPasswordHash !== undefined && user.passwordHash !== expectedPasswordHash)) return null;
+    await tx.insert(sessions).values({ userId, tokenHash, expiresAt });
+    return user;
+  });
+}
+export async function replacePasswordAndSession(input: { userId: string; sessionId: string; expectedPasswordHash: string; passwordHash: string; tokenHash: string; expiresAt: Date }) {
+  return getDb().transaction(async tx => {
+    const user = (await tx.select().from(users).where(eq(users.id, input.userId)).for('update'))[0];
+    if (!user?.active || user.deletedAt || user.passwordHash !== input.expectedPasswordHash) return null;
+    const session = (await tx.select().from(sessions).where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.userId), isNull(sessions.revokedAt), gt(sessions.expiresAt, new Date()))).for('update'))[0];
+    if (!session) return null;
+    const updated = (await tx.update(users).set({ passwordHash: input.passwordHash, mustChangePassword: false }).where(eq(users.id, input.userId)).returning())[0]!;
+    await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, input.userId), isNull(sessions.revokedAt)));
+    await tx.insert(sessions).values({ userId: input.userId, tokenHash: input.tokenHash, expiresAt: input.expiresAt });
+    await tx.execute(sql`INSERT INTO user_management_events(actor_id,user_id,action,details) VALUES (${input.userId},${input.userId},'password_changed','{}'::jsonb)`);
+    return updated;
+  });
 }
 export async function findSession(tokenHash: string, now: Date) {
   const rows = await getDb().select({
@@ -19,9 +37,11 @@ export async function findSession(tokenHash: string, now: Date) {
     username: users.username,
     realName: users.realName,
     role: users.role,
+    isStarred: users.isStarred,
+    mustChangePassword: users.mustChangePassword,
     verifiedCfHandle: sql<string | null>`(SELECT a.handle FROM platform_bindings b JOIN platform_accounts a ON a.id=b.account_id WHERE b.user_id=${users.id} AND b.platform='codeforces')`,
   }).from(sessions).innerJoin(users, eq(users.id, sessions.userId)).where(and(
-    eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt), gt(sessions.expiresAt, now), eq(users.active, true),
+    eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt), gt(sessions.expiresAt, now), eq(users.active, true), isNull(users.deletedAt),
   )).limit(1);
   return rows[0] ?? null;
 }

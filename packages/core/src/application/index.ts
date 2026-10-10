@@ -1,4 +1,5 @@
 export * from './auth';
+export * from './user-management';
 export * from './config';
 export * from './errors';
 export * from './collection/request-context';

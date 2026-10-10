@@ -39,7 +39,7 @@ export async function enqueuePersonalInTransaction(client: PoolClient, boss: PgB
 export async function requestPersonalSync(bindingId: string, mode: 'backfill' | 'incremental', boss: PgBoss, range?: PersonalSyncRange, source: SyncSource = 'manual', actorId?: string) {
   return transaction(async client => {
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended(user_id::text||':'||platform,73192405)) FROM platform_bindings WHERE id=$1`, [bindingId]);
-    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 AND b.account_id IS NOT NULL FOR UPDATE OF b', [bindingId])).rows[0];
+    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.id=$1 AND b.account_id IS NOT NULL FOR UPDATE OF b', [bindingId])).rows[0];
     if (!binding) throw new Error('NO_ACTIVE_BINDING');
     const result = await enqueuePersonalInTransaction(client, boss, binding, 'sync', mode, range, source, actorId);
     if (actorId) await client.query("INSERT INTO collection_audit_logs(actor_id,action,target,details) VALUES ($1,'sync_requested',$2,$3)", [actorId, binding.id, JSON.stringify({ ...result, source, mode })]);
@@ -86,7 +86,7 @@ export async function retryPersonalRun(id: string, boss: PgBoss, resetRetries = 
     await lockRunBinding(client, id);
     const run = (await client.query<SyncRow>('SELECT * FROM sync_runs WHERE id=$1 FOR UPDATE', [id])).rows[0];
     if (!run || !['failed', 'paused'].includes(run.status)) throw new Error('SYNC_STATE_CONFLICT');
-    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
+    const binding = (await client.query<BindingRow>('SELECT b.* FROM platform_bindings b JOIN users u ON u.id=b.user_id AND u.active AND u.deleted_at IS NULL WHERE b.id=$1 FOR UPDATE OF b', [run.binding_id])).rows[0];
     if (!binding || binding.version !== run.binding_version) throw new Error('STALE_BINDING');
     await assertCollectionAvailable(binding.platform, run.collection_generation, client);
     const active = (await client.query<SyncRow>("SELECT * FROM sync_runs WHERE binding_id=$1 AND kind=$2 AND status IN ('queued','running')", [run.binding_id, run.kind])).rows[0];

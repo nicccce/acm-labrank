@@ -5,13 +5,14 @@ import { displayName } from '../../domain';
 import { AppError } from '../errors';
 import { withReadQueue } from '../collection/jobs';
 import { platformIds } from '@acm/connectors/metadata';
+import { userManagementCall } from '../user-management';
 
 const platforms = platformIds;
 export function personalPlatform(platform: string): PlatformId {
   if (!platforms.includes(platform as PlatformId)) throw new AppError('INVALID_INPUT', '不支持的平台', 400); return platform as PlatformId;
 }
 export async function personalCall<T>(fn: () => Promise<T>) {
-  try { return await fn(); } catch (error) {
+  try { return await userManagementCall(fn); } catch (error) {
     const code = error instanceof Error ? error.message : '';
     if (['ACCOUNT_OCCUPIED', 'STALE_BINDING', 'SYNC_STATE_CONFLICT', 'SYNC_RANGE_CONFLICT', 'NO_ACTIVE_BINDING', 'TEAM_ACCOUNT_UNSUPPORTED'].includes(code)) throw new AppError(code, code === 'ACCOUNT_OCCUPIED' ? '该平台身份已被绑定' : code === 'SYNC_RANGE_CONFLICT' ? '该账号已有其他日期范围的同步任务，请等待完成后再提交' : '绑定或任务状态已变化，请刷新', 409);
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505') throw new AppError('STATE_CONFLICT', '账号或任务已被占用，请刷新', 409);
@@ -21,12 +22,12 @@ export async function personalCall<T>(fn: () => Promise<T>) {
 export async function getMemberProfile(id: string) {
   if (!z.uuid().safeParse(id).success) throw new AppError('INVALID_INPUT', '成员 ID 不合法', 400);
   const row = await memberProfile(id); if (!row) throw new AppError('NOT_FOUND', '成员不存在', 404);
-  return { id: row.id, username: row.username, realName: row.realName, displayName: displayName(row), role: row.role };
+  return { id: row.id, username: row.username, realName: row.realName, displayName: displayName(row), role: row.role, isStarred: row.isStarred };
 }
 export async function saveMemberProfile(id: string, input: unknown) {
   const parsed = z.object({ realName: z.string().trim().max(64).nullable() }).strict().safeParse(input);
   if (!parsed.success) throw new AppError('INVALID_INPUT', '姓名需在 64 字内', 400);
-  await updateMemberName(id, parsed.data.realName || null); return getMemberProfile(id);
+  await userManagementCall(() => updateMemberName(id, parsed.data.realName || null)); return getMemberProfile(id);
 }
 export async function getMemberBindings(userId: string) {
   const rows = await listBindings(userId);

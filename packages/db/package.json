@@ -1,14 +1,31 @@
 {
   "name": "@acm/db",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "exports": {
-    "./server": { "browser": "./src/browser.ts", "default": "./src/index.ts" },
-    "./schema": { "browser": "./src/browser.ts", "default": "./src/schema.ts" }
+    "./server": {
+      "browser": "./src/browser.ts",
+      "default": "./src/index.ts"
+    },
+    "./schema": {
+      "browser": "./src/browser.ts",
+      "default": "./src/schema.ts"
+    }
   },
-  "scripts": { "typecheck": "tsc -p tsconfig.json", "generate": "drizzle-kit generate" },
-  "dependencies": { "drizzle-orm": "0.45.3", "pg": "8.23.1", "pg-boss": "12.35.1", "server-only": "0.0.1" },
-  "devDependencies": { "drizzle-kit": "0.31.11", "@types/pg": "8.23.1" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.1",
+    "pg-boss": "12.35.1",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11",
+    "@types/pg": "8.23.1"
+  }
 }

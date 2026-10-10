@@ -1,5 +1,6 @@
 export { getDb, getPool, closeDb } from './client';
 export * from './auth';
+export * from './user-management';
 export * from './health';
 export * from './queue';
 export * from './collection/platform-requests';

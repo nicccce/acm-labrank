@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getPool } from './client';
 
 // Increment when adding a business migration. Older/newer schemas require an explicit deployment.
-export const EXPECTED_MIGRATIONS = 13;
+export const EXPECTED_MIGRATIONS = 14;
 // pg-boss 12.35.1 uses schema 43; update together with the locked library.
 export const EXPECTED_QUEUE_SCHEMA = 43;
 
@@ -28,12 +28,18 @@ export async function checkDatabaseReady(): Promise<boolean> {
     to_regclass('public.teams') AS teams,
     to_regclass('public.team_memberships') AS team_memberships,
     to_regclass('public.team_events') AS team_events,
+    to_regclass('public.user_management_events') AS user_management_events,
     to_regclass('pgboss.version') AS queue,
     to_regclass('drizzle.__drizzle_migrations') AS migrations`);
   if (Object.values(result.rows[0]).some((value) => value === null)) return false;
   const count = await pool.query('SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations');
   const queue = await pool.query('SELECT version FROM pgboss.version');
-  return count.rows[0].count === EXPECTED_MIGRATIONS && Number(queue.rows[0]?.version) === EXPECTED_QUEUE_SCHEMA;
+  const columns = await pool.query(`SELECT count(*)::int AS count FROM information_schema.columns
+    WHERE table_schema='public' AND (
+      (table_name='users' AND column_name IN ('is_starred','must_change_password') OR table_name='teams' AND column_name='is_starred')
+        AND data_type='boolean' AND is_nullable='NO' AND column_default='false'
+      OR table_name='users' AND column_name='deleted_at' AND data_type='timestamp with time zone' AND is_nullable='YES' AND column_default IS NULL)`);
+  return count.rows[0].count === EXPECTED_MIGRATIONS && Number(queue.rows[0]?.version) === EXPECTED_QUEUE_SCHEMA && columns.rows[0].count === 4;
 }
 export async function writeWorkerHeartbeat() {
   await getPool().query(`INSERT INTO runtime_heartbeats(instance_id, service, updated_at)

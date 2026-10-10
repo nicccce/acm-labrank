@@ -17,7 +17,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       });
       const result = await response.json();
       if (!response.ok) { setError(result.message ?? '操作失败'); return; }
-      router.replace('/'); router.refresh();
+      router.replace(result.user?.mustChangePassword ? '/change-password' : '/'); router.refresh();
     } catch { setError('网络连接失败，请稍后重试'); }
     finally { setBusy(false); }
   }

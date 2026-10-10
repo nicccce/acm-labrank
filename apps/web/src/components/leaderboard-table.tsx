@@ -5,6 +5,7 @@ import { formatTime } from './score-display';
 type LeaderboardEntry = {
   id: string;
   rank: number | null;
+  isStarred: boolean;
   name: string;
   points: number;
   solveCount: number;
@@ -38,9 +39,9 @@ export function LeaderboardTable({ items, kind, userId, signedIn, detailQuery }:
       <tbody>{items.map(row => {
         const self = !team && row.id === userId;
         const time = formatTime(row.lastAcAt);
-        return <tr key={row.id} className={`${row.rank !== null && row.rank <= 3 ? `podium-row podium-${row.rank}` : ''}${self ? ' self-row' : ''}`}>
-          <td className="rank-column"><span className={`rank-badge rank-${row.rank}`}>{row.rank === null ? '—' : String(row.rank).padStart(2, '0')}</span></td>
-          <td className="name-column"><div className="entry-heading">{signedIn ? <Link href={`/${team ? 'teams' : 'members'}/${row.id}?${detailQuery}`}>{row.name}</Link> : <span className="entry-name">{row.name}</span>}{self && <span className="self-tag">我</span>}{row.provisional && <span className="entry-status">暂定</span>}</div>{row.members && <span className="entry-members">{row.members.map(member => member.displayName).join('、')}</span>}</td>
+        return <tr key={row.id} className={`${!row.isStarred && row.rank !== null && row.rank <= 3 ? `podium-row podium-${row.rank}` : ''}${self ? ' self-row' : ''}${row.isStarred ? ' starred-row' : ''}`}>
+          <td className="rank-column"><span className={`rank-badge rank-${row.rank}`} aria-label={row.isStarred ? '打星，不参与排名' : undefined}>{row.isStarred ? '*' : row.rank === null ? '—' : String(row.rank).padStart(2, '0')}</span></td>
+          <td className="name-column"><div className="entry-heading">{signedIn ? <Link href={`/${team ? 'teams' : 'members'}/${row.id}?${detailQuery}`}>{row.name}</Link> : <span className="entry-name">{row.name}</span>}{self && <span className="self-tag">我</span>}{row.isStarred && <span className="entry-status">不参与排名</span>}{row.provisional && <span className="entry-status">暂定</span>}</div>{row.members && <span className="entry-members">{row.members.map(member => member.displayName).join('、')}</span>}</td>
           <td className="points-cell number-column score-column">{formatPoints(row.points)}</td>
           <td className="number-column solve-column">{row.solveCount}</td>
           {(['codeforces', 'qoj', 'luogu'] as const).map(platform => <td key={platform} className={`number-column platform-column${!row.platformSolveCounts[platform] ? ' zero-count' : ''}`}>{row.platformSolveCounts[platform] ?? 0}</td>)}

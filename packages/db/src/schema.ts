@@ -8,6 +8,9 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   role: text('role').$type<'admin' | 'member'>().default('member').notNull(),
   active: boolean('active').default(true).notNull(),
+  isStarred: boolean('is_starred').default(false).notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  mustChangePassword: boolean('must_change_password').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('users_username_unique').on(table.username),
@@ -27,6 +30,7 @@ export const sessions = pgTable('sessions', {
 export const teams = pgTable('teams', {
   id: uuid('id').defaultRandom().primaryKey(), name: text('name').notNull(),
   rosterKey: text('roster_key').notNull(), version: integer('version').default(1).notNull(),
+  isStarred: boolean('is_starred').default(false).notNull(),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, t => [uniqueIndex('team_roster_unique').on(t.rosterKey), check('team_values', sql`length(btrim(${t.name})) BETWEEN 1 AND 64 AND ${t.version}>0`)]);
@@ -41,6 +45,15 @@ export const teamEvents = pgTable('team_events', {
   actorId: uuid('actor_id').notNull().references(() => users.id), action: text('action').notNull(),
   details: jsonb('details').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const userManagementEvents = pgTable('user_management_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actorId: uuid('actor_id').notNull().references(() => users.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  action: text('action').notNull(),
+  details: jsonb('details').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, t => [index('user_management_events_user').on(t.userId, t.createdAt)]);
 
 export const authRateLimits = pgTable('auth_rate_limits', {
   key: text('key').primaryKey(),

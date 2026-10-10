@@ -1,6 +1,6 @@
 {
   "name": "acm-leaderboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,7 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "setup": "node scripts/setup.mjs",
+    "deploy:update": "node scripts/update.mjs",
     "doctor": "node scripts/doctor.mjs",
     "db:generate": "pnpm --filter @acm/db generate",
     "db:migrate": "tsx --env-file-if-exists=.env packages/db/src/migrate.ts",
@@ -35,6 +36,8 @@
     "personal:probe": "tsx --env-file-if-exists=.env scripts/personal-probe.ts",
     "personal:verify": "tsx --env-file-if-exists=.env scripts/verify-personal.ts",
     "teams:verify": "tsx --env-file-if-exists=.env scripts/verify-teams.ts",
+    "users:verify": "tsx --env-file-if-exists=.env scripts/verify-user-management.ts",
+    "upgrade:verify": "tsx --env-file-if-exists=.env scripts/verify-upgrade.ts",
     "web:probe": "tsx --env-file-if-exists=.env scripts/web-probe.ts"
   },
   "devDependencies": {
